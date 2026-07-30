@@ -246,6 +246,7 @@ class CheckinController {
             category: 'N/A',
             registration_type: 'N/A',
             venue: 'N/A',
+            email:'N/A',
             entry_status: 'Invalid / Unassigned QR'
           }
         });
@@ -305,7 +306,8 @@ class CheckinController {
             category: reg.delegate_category || 'N/A',
             registration_type: reg.registration_type || 'N/A',
             venue: venueName,
-            entry_status: 'Already Checked In'
+            email: reg.email || 'N/A',
+            entry_status: reg.status || 'Checked In'
           }
         });
       }
@@ -354,13 +356,14 @@ class CheckinController {
 
       return res.json({
         success: true,
-        message: 'Checked In',
+        message: `Festival entry granted for ${reg.name}`,
         data: {
           name: reg.name,
           category: reg.delegate_category || 'N/A',
           registration_type: reg.registration_type || 'N/A',
           venue: venueName,
-          entry_status: 'Checked In'
+          email: reg.email || 'N/A',
+          entry_status: reg.status || 'Checked In'
         }
       });
     } catch (err) {

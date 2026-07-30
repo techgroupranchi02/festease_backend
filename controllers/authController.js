@@ -158,6 +158,17 @@ class AuthController {
       return res.status(500).json({ success: false, message: 'Google OAuth is not configured on the server.' });
     }
 
+    // Accept account_type from query (e.g. ?account_type=individual or ?account_type=organization)
+    // and carry it through the OAuth flow via the state parameter.
+    const account_type = req.query.account_type || '';
+    const allowedTypes = ['individual', 'organization'];
+    if (account_type && !allowedTypes.includes(account_type.trim().toLowerCase())) {
+      return res.status(400).json({ success: false, message: 'account_type must be "individual" or "organization".' });
+    }
+
+    // Encode account_type in state so the callback can retrieve it
+    const state = account_type ? Buffer.from(JSON.stringify({ account_type: account_type.trim().toLowerCase() })).toString('base64') : '';
+
     const params = new URLSearchParams({
       client_id:     clientId,
       redirect_uri:  redirectUri,
@@ -165,6 +176,7 @@ class AuthController {
       scope:         'openid email profile',
       access_type:   'online',
       prompt:        'select_account',
+      ...(state ? { state } : {}),
     });
 
     return res.redirect(`https://accounts.google.com/o/oauth2/v2/auth?${params.toString()}`);
@@ -179,10 +191,21 @@ class AuthController {
     const frontendUrl = (process.env.FESTEASE_FRONTEND_URL || 'https://festease.autovertest.com').replace(/\/$/, '');
 
     try {
-      const { code, error: oauthError } = req.query;
+      const { code, error: oauthError, state } = req.query;
 
       if (oauthError || !code) {
         return res.redirect(`${frontendUrl}/google-signin?error=${encodeURIComponent(oauthError || 'access_denied')}`);
+      }
+
+      // Decode account_type from state param (set by googleRedirect)
+      let account_type = null;
+      if (state) {
+        try {
+          const decoded = JSON.parse(Buffer.from(state, 'base64').toString('utf8'));
+          if (decoded.account_type) account_type = decoded.account_type.trim().toLowerCase();
+        } catch {
+          // Ignore malformed state
+        }
       }
 
       const clientId     = process.env.GOOGLE_CLIENT_ID;
@@ -230,9 +253,17 @@ class AuthController {
       const cleanEmail = googleEmail.trim().toLowerCase();
 
       // 3. Fetch all user accounts matching email
-      const matchingUsers = await User.findAllByEmail(cleanEmail);
+      let matchingUsers = await User.findAllByEmail(cleanEmail);
       if (!matchingUsers || matchingUsers.length === 0) {
-        return res.redirect(`${frontendUrl}/google-signin?error=${encodeURIComponent('User don\'t a freecomers account')}`);
+        return res.redirect(`${frontendUrl}/google-signin?error=${encodeURIComponent('no_account')}`);
+      }
+
+      // Filter by account_type if provided (mirrors login behaviour)
+      if (account_type) {
+        matchingUsers = matchingUsers.filter(u => u.account_type === account_type);
+        if (matchingUsers.length === 0) {
+          return res.redirect(`${frontendUrl}/google-signin?error=${encodeURIComponent('no_account')}`);
+        }
       }
 
       let selectedUser     = null;
@@ -418,7 +449,7 @@ class AuthController {
     } catch (error) {
       console.error('googleCallback error:', error.message);
       const frontendUrl = (process.env.FESTEASE_FRONTEND_URL || 'https://festease.autovertest.com').replace(/\/$/, '');
-      return res.redirect(`${frontendUrl}?google-error=${encodeURIComponent('server_error')}`);
+      return res.redirect(`${frontendUrl}/google-signin?error=${encodeURIComponent('server_error')}`);
     }
   }
   /**
@@ -426,24 +457,38 @@ class AuthController {
    */
   static async login(req, res) {
     try {
-      const { email, password } = req.body || {};
+      const { email, password, account_type } = req.body || {};
 
       // --- Input Validation ---
-      const result = validate(req.body, {
+      const validationRules = {
         email:    [rules.required(), rules.email(), rules.maxLength(255)],
         password: [rules.required(), rules.string(), rules.maxLength(128)],
-      });
+        account_type: [rules.required(), rules.string(), rules.inList(['individual', 'organization'])],
+      };
+      const result = validate(req.body, validationRules);
       if (!result.valid) return sendValidationError(res, result.errors);
 
       const cleanEmail = email.trim().toLowerCase();
 
       // 1. Fetch all user accounts matching email (handles dual individual/organization accounts)
-      const matchingUsers = await User.findAllByEmail(cleanEmail);
+      let matchingUsers = await User.findAllByEmail(cleanEmail);
       if (!matchingUsers || matchingUsers.length === 0) {
         return res.status(401).json({
           success: false,
           message: 'Invalid email or password.'
         });
+      }
+
+      // Filter by account_type if provided in request body
+      if (account_type) {
+        const cleanAccountType = account_type.trim().toLowerCase();
+        matchingUsers = matchingUsers.filter(u => u.account_type === cleanAccountType);
+        if (matchingUsers.length === 0) {
+          return res.status(401).json({
+            success: false,
+            message: 'Invalid email or password.'
+          });
+        }
       }
 
       let selectedUser = null;
@@ -735,18 +780,18 @@ class AuthController {
       return res.json({
         success: true,
         message: 'Login successful',
-        token,
-        user: {
-          user_id: selectedUser.id,
-          account_type: selectedUser.account_type,
-          name: selectedProfile ? selectedProfile.name : null,
-          username: selectedProfile ? selectedProfile.username : null,
-          profile_pic: selectedProfile ? selectedProfile.profile_pic : null,
-          thumbnail_pic: selectedProfile ? selectedProfile.thumbnail_pic : null,
-          email: selectedUser.email,
-          user_is: isOwner ? 'owner' : 'volunteer',
-          festivals: loginFestivals
-        }
+        token
+        // user: {
+        //   user_id: selectedUser.id,
+        //   account_type: selectedUser.account_type,
+        //   name: selectedProfile ? selectedProfile.name : null,
+        //   username: selectedProfile ? selectedProfile.username : null,
+        //   profile_pic: selectedProfile ? selectedProfile.profile_pic : null,
+        //   thumbnail_pic: selectedProfile ? selectedProfile.thumbnail_pic : null,
+        //   email: selectedUser.email,
+        //   user_is: isOwner ? 'owner' : 'volunteer',
+        //   festivals: loginFestivals
+        // }
       });
 
     } catch (error) {

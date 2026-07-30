@@ -1,10 +1,15 @@
 pipeline {
     agent any
 
+    triggers {
+        githubPush()
+        pollSCM('H/2 * * * *')
+    }
+
     parameters {
         choice(
             name: 'DEPLOY_ENV',
-            choices: ['development', 'production'],
+            choices: ['production', 'development'],
             description: 'Target deployment environment'
         )
     }
@@ -33,10 +38,11 @@ pipeline {
         stage('Deploy') {
             steps {
                 script {
-                    def targetServer = (params.DEPLOY_ENV == 'production') ? env.PROD_SERVER : env.DEV_SERVER
-                    def targetPath = (params.DEPLOY_ENV == 'production') ? env.PROD_PATH : env.DEV_PATH
+                    def targetEnv = params.DEPLOY_ENV ?: 'production'
+                    def targetServer = (targetEnv == 'production') ? env.PROD_SERVER : env.DEV_SERVER
+                    def targetPath = (targetEnv == 'production') ? env.PROD_PATH : env.DEV_PATH
 
-                    echo "Deploying festease_backend to ${params.DEPLOY_ENV} (${targetServer})..."
+                    echo "Deploying festease_backend to ${targetEnv} (${targetServer})..."
 
                     sshagent([env.SSH_CREDENTIALS_ID]) {
                         // Ensure directory exists on target server
@@ -64,7 +70,7 @@ pipeline {
 
     post {
         success {
-            echo "Successfully deployed festease_backend to ${params.DEPLOY_ENV} environment."
+            echo "Successfully deployed festease_backend to ${params.DEPLOY_ENV ?: 'production'} environment."
         }
         failure {
             echo "Pipeline execution failed for festease_backend. Please check logs for details."

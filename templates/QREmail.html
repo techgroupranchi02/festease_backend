@@ -1,0 +1,155 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <meta http-equiv="X-UA-Compatible" content="IE=edge">
+  <title>Your Ticket — {{ event_name }}</title>
+</head>
+<body style="margin:0;padding:0;background-color:#dadada;font-family:'Segoe UI',Arial,sans-serif;-webkit-font-smoothing:antialiased;">
+
+  <!-- Outer wrapper -->
+  <table width="100%" cellpadding="0" cellspacing="0" border="0" style="background-color:rgba(253, 253, 253, 0);min-height:100vh;">
+    <tr>
+      <td align="center" style="padding:40px 16px;">
+
+        <!-- Card -->
+        <table width="100%" cellpadding="0" cellspacing="0" border="0" style="max-width:520px;border-radius:20px;overflow:hidden;box-shadow:0 24px 60px rgba(0,0,0,0.6);">
+
+          <!-- Header -->
+          <tr>
+            <td style="background:linear-gradient(135deg,#691b1b 0%,#d92828 60%,#f75555 100%);padding:40px 36px 32px;text-align:center;">
+              <div style="display:inline-block;background:rgba(255,255,255,0.15);border:1px solid rgba(255,255,255,0.25);border-radius:50px;padding:6px 18px;margin-bottom:18px;">
+                <span style="font-size:11px;font-weight:700;letter-spacing:2.5px;color:#ffd5d5;text-transform:uppercase;">Festival Ticket</span>
+              </div>
+              <h1 style="margin:0 0 8px;font-size:26px;font-weight:700;color:#ffffff;line-height:1.2;letter-spacing:-0.5px;">{{ event_name }}</h1>
+              <p style="margin:0;font-size:13px;color:#fdb5b5;letter-spacing:1px;text-transform:uppercase;">Admission Pass &middot; #{{ ticket_id }}</p>
+            </td>
+          </tr>
+
+          <!-- QR Code Section -->
+          <tr>
+            <td style="background:#3a0f0f;padding:32px 36px;text-align:center;border-bottom:1px solid rgba(246, 92, 92, 0.2);">
+              <p style="margin:0 0 20px;font-size:13px;color:#fa8b8b;letter-spacing:1.5px;text-transform:uppercase;font-weight:600;">Your Entry QR Code</p>
+              <div style="display:inline-block;background:#ffffff;padding:14px;border-radius:16px;box-shadow:0 8px 32px rgba(246, 92, 92, 0.4);">
+                <img src="{{ qr_data_url }}" alt="QR Code" width="200" height="200" style="display:block;border:none;">
+              </div>
+              <p style="margin:16px 0 0;font-size:12px;color:#806b6b;">Present this QR code at the venue entrance</p>
+            </td>
+          </tr>
+
+          <!-- Attendee Details header -->
+          <tr>
+            <td style="background:#ffffff;padding:28px 36px 0;">
+              <p style="margin:0 0 14px;font-size:11px;font-weight:700;color:#ed3a3a;letter-spacing:2px;text-transform:uppercase;">Attendee Details</p>
+            </td>
+          </tr>
+          <!-- Attendee rows -->
+          <tr>
+            <td style="background:#ffffff;padding:0 36px 8px;">
+              <table width="100%" cellpadding="0" cellspacing="0" border="0">
+                <tr><td style="padding:10px 0;border-bottom:1px solid #f3f4f6;">
+                  <table width="100%" cellpadding="0" cellspacing="0" border="0"><tr>
+                    <td style="font-size:13px;color:#806b6b;">Name</td>
+                    <td style="font-size:13px;font-weight:600;color:#111827;text-align:right;">{{ attendee_name }}</td>
+                  </tr></table>
+                </td></tr>
+                <tr><td style="padding:10px 0;border-bottom:1px solid #f3f4f6;">
+                  <table width="100%" cellpadding="0" cellspacing="0" border="0"><tr>
+                    <td style="font-size:13px;color:#6b7280;">Email</td>
+                    <td style="font-size:13px;font-weight:600;color:#111827;text-align:right;word-break:break-all;">{{ attendee_email }}</td>
+                  </tr></table>
+                </td></tr>
+                {{ attendee_phone_html }}
+                <tr><td style="padding:10px 0;border-bottom:1px solid #f3f4f6;">
+                  <table width="100%" cellpadding="0" cellspacing="0" border="0"><tr>
+                    <td style="font-size:13px;color:#6b7280;">Category</td>
+                    <td style="font-size:13px;font-weight:600;color:#111827;text-align:right;">{{ attendee_category }}</td>
+                  </tr></table>
+                </td></tr>
+                <tr><td style="padding:10px 0;border-bottom:1px solid #f3f4f6;">
+                  <table width="100%" cellpadding="0" cellspacing="0" border="0"><tr>
+                    <td style="font-size:13px;color:#6b7280;">Reg Type</td>
+                    <td style="font-size:13px;font-weight:600;color:#111827;text-align:right;">{{ registration_type }}</td>
+                  </tr></table>
+                </td></tr>
+                <tr><td style="padding:10px 0;border-bottom:1px solid #f3f4f6;">
+                  <table width="100%" cellpadding="0" cellspacing="0" border="0"><tr>
+                    <td style="font-size:13px;color:#6b7280;">Ticket ID</td>
+                    <td style="font-size:13px;font-weight:600;color:#d92828;text-align:right;">#{{ ticket_id }}</td>
+                  </tr></table>
+                </td></tr>
+                <tr><td style="padding:10px 0;">
+                  <table width="100%" cellpadding="0" cellspacing="0" border="0"><tr>
+                    <td style="font-size:13px;color:#6b7280;">Registered On</td>
+                    <td style="font-size:13px;font-weight:600;color:#111827;text-align:right;">{{ registered_on }}</td>
+                  </tr></table>
+                </td></tr>
+              </table>
+            </td>
+          </tr>
+
+          <!-- Divider -->
+          <tr>
+            <td style="background:#ffffff;padding:0 36px;">
+              <div style="height:1px;background:linear-gradient(to right,transparent,rgba(139,92,246,0.3),transparent);margin:8px 0 20px;"></div>
+            </td>
+          </tr>
+
+          <!-- Event Details header -->
+          <tr>
+            <td style="background:#ffffff;padding:0 36px 8px;">
+              <p style="margin:0 0 14px;font-size:11px;font-weight:700;color:#ed3a3a;letter-spacing:2px;text-transform:uppercase;">Event Details</p>
+            </td>
+          </tr>
+          <!-- Event rows -->
+          <tr>
+            <td style="background:#ffffff;padding:0 36px 28px;">
+              <table width="100%" cellpadding="0" cellspacing="0" border="0">
+                <tr><td style="padding:10px 0;border-bottom:1px solid #f3f4f6;">
+                  <table width="100%" cellpadding="0" cellspacing="0" border="0"><tr>
+                    <td style="font-size:13px;color:#6b7280;">Event</td>
+                    <td style="font-size:13px;font-weight:600;color:#111827;text-align:right;">{{ event_name }}</td>
+                  </tr></table>
+                </td></tr>
+                <tr><td style="padding:10px 0;">{{ venues_html }}</td></tr>
+              </table>
+            </td>
+          </tr>
+
+          <!-- Ticket stub notch -->
+          <tr>
+            <td style="background:#ffffff;padding:0;">
+              <table width="100%" cellpadding="0" cellspacing="0" border="0">
+                <tr>
+                  <!-- <td width="20" style="background:#dadada;border-radius:0 20px 20px 0;">&nbsp;</td> -->
+                  <td style="border-top:2px dashed rgba(246, 92, 92, 0.35);height:2px;"></td>
+                  <!-- <td width="20" style="background:#7c7c7c;border-radius:20px 0 0 20px;">&nbsp;</td> -->
+                </tr>
+              </table>
+            </td>
+          </tr>
+
+          <!-- Footer -->
+          <tr>
+            <td style="background:#fff5f5;padding:24px 36px;text-align:center;border-radius:0 0 20px 20px;">
+              <p style="margin:0 0 8px;font-size:12px;color:#ed3a3a;font-weight:600;letter-spacing:0.5px;">&#127916; FestEase &middot; Powered by Freecomers</p>
+              <p style="margin:0;font-size:11px;color:#9ca3af;line-height:1.6;">
+                This ticket is non-transferable and valid for one-time entry.<br>
+                Keep this email as your proof of registration.
+              </p>
+            </td>
+          </tr>
+
+        </table>
+
+        <p style="margin:24px 0 0;font-size:11px;color:#4b5563;text-align:center;">
+          Questions? Contact your festival organizer.
+        </p>
+
+      </td>
+    </tr>
+  </table>
+
+</body>
+</html>

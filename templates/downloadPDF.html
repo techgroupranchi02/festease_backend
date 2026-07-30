@@ -1,0 +1,344 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Festival Ticket - {{ attendee_name }}</title>
+  <link href="https://fonts.googleapis.com/css2?family=Outfit:wght@300;400;600;700&display=swap" rel="stylesheet">
+  <style>
+    :root {
+      --bg-gradient: linear-gradient(135deg, #f5f3ff 0%, #edd8fc 100%);
+      --card-bg: #ffffff;
+      --card-border: rgba(139, 92, 246, 0.12);
+      --primary-glow: radial-gradient(circle, rgba(139, 92, 246, 0.08) 0%, transparent 60%);
+      --accent: #6d28d9;
+      --accent-light: #7c3aed;
+      --text-main: #1f2937;
+      --text-muted: #4b5563;
+    }
+    
+    * {
+      box-sizing: border-box;
+      margin: 0;
+      padding: 0;
+    }
+    
+    body {
+      font-family: 'Outfit', sans-serif;
+      background: var(--bg-gradient);
+      color: var(--text-main);
+      min-height: 100vh;
+      display: flex;
+      justify-content: center;
+      align-items: center;
+      padding: 2rem 1rem;
+      overflow-x: hidden;
+      position: relative;
+    }
+
+    /* Decorative glow blobs */
+    body::before, body::after {
+      content: '';
+      position: absolute;
+      width: 300px;
+      height: 300px;
+      border-radius: 50%;
+      background: rgba(139, 92, 246, 0.25);
+      filter: blur(120px);
+      z-index: 0;
+    }
+    body::before { top: 10%; left: 10%; }
+    body::after { bottom: 10%; right: 10%; }
+
+    .ticket-container {
+      background: var(--card-bg);
+      backdrop-filter: blur(20px);
+      -webkit-backdrop-filter: blur(20px);
+      border: 1px solid var(--card-border);
+      border-radius: 24px;
+      width: 100%;
+      max-width: 450px;
+      padding: 2.5rem;
+      box-shadow: 0 20px 40px rgba(0, 0, 0, 0.4);
+      z-index: 10;
+      position: relative;
+      overflow: hidden;
+    }
+
+    .ticket-container::before {
+      content: '';
+      position: absolute;
+      top: -50%;
+      left: -50%;
+      width: 200%;
+      height: 200%;
+      background: var(--primary-glow);
+      z-index: -1;
+      pointer-events: none;
+    }
+
+    .header {
+      text-align: center;
+      margin-bottom: 2rem;
+    }
+
+    .header h1 {
+      font-size: 1.8rem;
+      font-weight: 700;
+      letter-spacing: 1px;
+      background: linear-gradient(to right, #111827, var(--accent));
+      -webkit-background-clip: text;
+      background-clip: text;
+      -webkit-text-fill-color: transparent;
+      margin-bottom: 0.25rem;
+    }
+
+    .header p {
+      font-size: 0.9rem;
+      color: var(--text-muted);
+      text-transform: uppercase;
+      letter-spacing: 2px;
+    }
+
+    .divider {
+      height: 1px;
+      background: linear-gradient(to right, transparent, var(--card-border), transparent);
+      margin: 1.5rem 0;
+    }
+
+    .section-title {
+      font-size: 0.85rem;
+      color: var(--accent-light);
+      text-transform: uppercase;
+      letter-spacing: 1.5px;
+      margin-bottom: 0.75rem;
+      font-weight: 600;
+    }
+
+    .info-group {
+      margin-bottom: 1.5rem;
+    }
+
+    .info-row {
+      display: flex;
+      justify-content: space-between;
+      margin-bottom: 0.5rem;
+      font-size: 0.95rem;
+    }
+
+    .info-label {
+      color: var(--text-muted);
+    }
+
+    .info-value {
+      font-weight: 600;
+      text-align: right;
+    }
+
+    .venue-list {
+      list-style: none;
+      margin-top: 0.25rem;
+    }
+
+    .venue-item {
+      font-size: 0.95rem;
+      color: var(--text-main);
+      display: flex;
+      align-items: center;
+      gap: 0.5rem;
+      margin-bottom: 0.4rem;
+      font-weight: 600;
+    }
+
+    .venue-item::before {
+      content: '•';
+      color: var(--accent);
+      font-size: 1.2rem;
+    }
+
+    .qr-section {
+      text-align: center;
+      margin: 2rem 0 1rem;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+    }
+
+    .qr-wrapper {
+      background: rgba(255, 255, 255, 0.95);
+      padding: 12px;
+      border-radius: 16px;
+      box-shadow: 0 10px 25px rgba(139, 92, 246, 0.2);
+      display: inline-block;
+      transition: transform 0.3s ease;
+    }
+
+    .qr-wrapper:hover {
+      transform: scale(1.03);
+    }
+
+    .qr-wrapper img {
+      display: block;
+      width: 160px;
+      height: 160px;
+    }
+
+    .qr-caption {
+      font-size: 0.85rem;
+      color: var(--text-muted);
+      margin-top: 1rem;
+      letter-spacing: 0.5px;
+    }
+
+    .footer-note {
+      font-size: 0.8rem;
+      color: var(--text-muted);
+      text-align: center;
+      line-height: 1.4;
+      margin-top: 1.5rem;
+    }
+
+    /* Print & Action Buttons */
+    .actions {
+      display: flex;
+      justify-content: center;
+      gap: 1rem;
+      margin-top: 2rem;
+      z-index: 10;
+    }
+
+    .btn {
+      font-family: inherit;
+      font-size: 0.9rem;
+      font-weight: 600;
+      padding: 0.75rem 1.5rem;
+      border-radius: 12px;
+      border: none;
+      cursor: pointer;
+      transition: all 0.2s ease;
+      display: inline-flex;
+      align-items: center;
+      gap: 0.5rem;
+    }
+
+    .btn-primary {
+      background: var(--accent);
+      color: white;
+      box-shadow: 0 4px 12px rgba(139, 92, 246, 0.3);
+    }
+
+    .btn-primary:hover {
+      background: #7c3aed;
+      box-shadow: 0 6px 16px rgba(139, 92, 246, 0.4);
+      transform: translateY(-1px);
+    }
+
+    @media print {
+      body {
+        background: white;
+        color: #1f2937;
+        min-height: auto;
+        padding: 0;
+      }
+      body::before, body::after {
+        display: none;
+      }
+      .ticket-container {
+        border: 1px solid rgba(139, 92, 246, 0.2);
+        box-shadow: none;
+        background: white;
+        color: #1f2937;
+        max-width: 100%;
+        padding: 1.5rem;
+      }
+      .header h1 {
+        background: none;
+        -webkit-text-fill-color: initial;
+        color: #1f2937;
+      }
+      .actions {
+        display: none;
+      }
+      .qr-wrapper {
+        box-shadow: none;
+        border: 1px solid rgba(139, 92, 246, 0.2);
+      }
+    }
+  </style>
+</head>
+<body>
+  <div>
+    <div class="ticket-container">
+      <div class="header">
+        <h1>Festival Ticket</h1>
+        <p>Admission Pass</p>
+      </div>
+
+      <div class="divider"></div>
+
+      <div class="section-title">Attendee Details</div>
+      <div class="info-group">
+        <div class="info-row">
+          <span class="info-label">Name</span>
+          <span class="info-value">{{ attendee_name }}</span>
+        </div>
+        <div class="info-row">
+          <span class="info-label">Email</span>
+          <span class="info-value">{{ attendee_email }}</span>
+        </div>
+        {{ attendee_phone_html }}
+        <div class="info-row">
+          <span class="info-label">Category</span>
+          <span class="info-value">{{ attendee_category }}</span>
+        </div>
+        <div class="info-row">
+          <span class="info-label">Reg Type</span>
+          <span class="info-value">{{ registration_type }}</span>
+        </div>
+        <div class="info-row">
+          <span class="info-label">Ticket ID</span>
+          <span class="info-value">#{{ ticket_id }}</span>
+        </div>
+        <div class="info-row">
+          <span class="info-label">Registered On</span>
+          <span class="info-value">{{ registered_on }}</span>
+        </div>
+      </div>
+
+      <div class="divider"></div>
+
+      <div class="section-title">Event Details</div>
+      <div class="info-group">
+        <div class="info-row">
+          <span class="info-label">Event</span>
+          <span class="info-value">{{ event_name }}</span>
+        </div>
+        {{ venues_html }}
+      </div>
+
+      <div class="divider"></div>
+
+      <div class="qr-section">
+        <div class="qr-wrapper">
+          <img src="{{ qr_data_url }}" alt="Ticket QR Code">
+        </div>
+        <div class="qr-caption">Scan QR Code at Entry</div>
+      </div>
+
+      <div class="footer-note">
+        This ticket is your entry pass. Please present this QR code at the venue.
+      </div>
+    </div>
+
+    <div class="actions">
+      <button class="btn btn-primary" onclick="window.print()">
+        <svg width="16" height="16" fill="currentColor" viewBox="0 0 16 16">
+          <path d="M2.5 8a.5.5 0 1 0 0-1 .5.5 0 0 0 0 1z"/>
+          <path d="M5 1a2 2 0 0 0-2 2v2H2a2 2 0 0 0-2 2v3a2 2 0 0 0 2 2h1v1a2 2 0 0 0 2 2h6a2 2 0 0 0 2-2v-1h1a2 2 0 0 0 2-2V7a2 2 0 0 0-2-2h-1V3a2 2 0 0 0-2-2H5zM4 3a1 1 0 0 1 1-1h6a1 1 0 0 1 1 1v2H4V3zm1 5a2 2 0 0 0-2 2v1H2a1 1 0 0 1-1-1V7a1 1 0 0 1 1-1h12a1 1 0 0 1 1 1v3a1 1 0 0 1-1 1h-1v-1a2 2 0 0 0-2-2H5zm7 2v3a1 1 0 0 1-1 1H5a1 1 0 0 1-1-1v-3a1 1 0 0 1 1-1h6a1 1 0 0 1 1 1z"/>
+        </svg>
+        Print Ticket
+      </button>
+    </div>
+  </div>
+</body>
+</html>

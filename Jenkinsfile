@@ -14,7 +14,7 @@ pipeline {
         PROD_SERVER = 'root@31.97.239.167'
         DEV_PATH = '/var/www/festease_backend'
         PROD_PATH = '/var/www/festease_backend'
-        SSH_CREDENTIALS_ID = 'feastease'
+        SSH_CREDENTIALS_ID = 'server-ssh-key'
     }
 
     stages {

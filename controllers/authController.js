@@ -65,7 +65,7 @@ class AuthController {
                 token,
                 user: {
                     user_id: user.id,
-                    account_type: user.account_type,
+                    accountType: user.account_type,
                     email: user.email,
                     film_festival_id: filmFestivalId
                 }
@@ -158,16 +158,16 @@ class AuthController {
       return res.status(500).json({ success: false, message: 'Google OAuth is not configured on the server.' });
     }
 
-    // Accept account_type from query (e.g. ?account_type=individual or ?account_type=organization)
+    // Accept accountType from query (e.g. ?accountType=individual or ?accountType=organization)
     // and carry it through the OAuth flow via the state parameter.
-    const account_type = req.query.account_type || '';
+    const accountType = req.query.accountType || req.query.account_type || '';
     const allowedTypes = ['individual', 'organization'];
-    if (account_type && !allowedTypes.includes(account_type.trim().toLowerCase())) {
-      return res.status(400).json({ success: false, message: 'account_type must be "individual" or "organization".' });
+    if (accountType && !allowedTypes.includes(accountType.trim().toLowerCase())) {
+      return res.status(400).json({ success: false, message: 'accountType must be "individual" or "organization".' });
     }
 
-    // Encode account_type in state so the callback can retrieve it
-    const state = account_type ? Buffer.from(JSON.stringify({ account_type: account_type.trim().toLowerCase() })).toString('base64') : '';
+    // Encode accountType in state so the callback can retrieve it
+    const state = accountType ? Buffer.from(JSON.stringify({ accountType: accountType.trim().toLowerCase() })).toString('base64') : '';
 
     const params = new URLSearchParams({
       client_id:     clientId,
@@ -197,12 +197,13 @@ class AuthController {
         return res.redirect(`${frontendUrl}/google-signin?error=${encodeURIComponent(oauthError || 'access_denied')}`);
       }
 
-      // Decode account_type from state param (set by googleRedirect)
-      let account_type = null;
+      // Decode accountType from state param (set by googleRedirect)
+      let accountType = null;
       if (state) {
         try {
           const decoded = JSON.parse(Buffer.from(state, 'base64').toString('utf8'));
-          if (decoded.account_type) account_type = decoded.account_type.trim().toLowerCase();
+          const rawAccountType = decoded.accountType || decoded.account_type;
+          if (rawAccountType) accountType = rawAccountType.trim().toLowerCase();
         } catch {
           // Ignore malformed state
         }
@@ -258,9 +259,9 @@ class AuthController {
         return res.redirect(`${frontendUrl}/google-signin?error=${encodeURIComponent('no_account')}`);
       }
 
-      // Filter by account_type if provided (mirrors login behaviour)
-      if (account_type) {
-        matchingUsers = matchingUsers.filter(u => u.account_type === account_type);
+      // Filter by accountType if provided (mirrors login behaviour)
+      if (accountType) {
+        matchingUsers = matchingUsers.filter(u => u.account_type === accountType);
         if (matchingUsers.length === 0) {
           return res.redirect(`${frontendUrl}/google-signin?error=${encodeURIComponent('no_account')}`);
         }
@@ -389,7 +390,7 @@ class AuthController {
       const isOwner = eventsRows.length > 0 || festivalsRows.length > 0;
 
       // 5. Fetch festivals list
-      const authPrefix = (process.env.auth_image_url_prefix || 'https://api.autovertest.com/api/v1/retrieve-media').replace(/\/+$/, '');
+      const authPrefix = (process.env.non_auth_image_url_prefix || process.env.auth_image_url_prefix || 'https://api.autovertest.com/api/v1/non-auth-user/retrieve-media').replace(/\/+$/, '');
       let loginFestivals;
       if (isOwner) {
         const ownerFestivals = await Event.getOwnerFestivals(selectedUser.id);
@@ -457,15 +458,16 @@ class AuthController {
    */
   static async login(req, res) {
     try {
-      const { email, password, account_type } = req.body || {};
+      const accountType = req.body?.accountType || req.body?.account_type;
+      const { email, password } = req.body || {};
 
       // --- Input Validation ---
       const validationRules = {
-        email:    [rules.required(), rules.email(), rules.maxLength(255)],
-        password: [rules.required(), rules.string(), rules.maxLength(128)],
-        account_type: [rules.required(), rules.string(), rules.inList(['individual', 'organization'])],
+        email:       [rules.required(), rules.email(), rules.maxLength(255)],
+        password:    [rules.required(), rules.string(), rules.maxLength(128)],
+        accountType: [rules.required(), rules.string(), rules.inList(['individual', 'organization'])],
       };
-      const result = validate(req.body, validationRules);
+      const result = validate({ ...req.body, accountType }, validationRules);
       if (!result.valid) return sendValidationError(res, result.errors);
 
       const cleanEmail = email.trim().toLowerCase();
@@ -479,9 +481,9 @@ class AuthController {
         });
       }
 
-      // Filter by account_type if provided in request body
-      if (account_type) {
-        const cleanAccountType = account_type.trim().toLowerCase();
+      // Filter by accountType if provided in request body
+      if (accountType) {
+        const cleanAccountType = accountType.trim().toLowerCase();
         matchingUsers = matchingUsers.filter(u => u.account_type === cleanAccountType);
         if (matchingUsers.length === 0) {
           return res.status(401).json({
@@ -701,7 +703,7 @@ class AuthController {
       }
 
       // 3. Fetch festivals with per-festival roles for login response
-      const authPrefixLogin = (process.env.auth_image_url_prefix || 'https://api.autovertest.com/api/v1/retrieve-media').replace(/\/+$/, '');
+      const authPrefixLogin = (process.env.non_auth_image_url_prefix || process.env.auth_image_url_prefix || 'https://api.autovertest.com/api/v1/non-auth-user/retrieve-media').replace(/\/+$/, '');
       let loginFestivals;
       if (isOwner) {
         const ownerFestivals = await Event.getOwnerFestivals(selectedUser.id);
@@ -818,40 +820,7 @@ class AuthController {
         });
       }
 
-      // Block access when the email has an organization account whose
-      // describes_me is 'Film Festival / Event Organizer' and that org
-      // owns at least one festival event (regardless of whether an
-      // individual sibling account also exists).
-      const allAccounts = await User.findAllByEmail(userWithProfile.email);
-      const orgAccount  = allAccounts.find(a => a.account_type === 'organization');
 
-      if (orgAccount) {
-        const Organization = require('../models/Organization');
-        const orgProfile = await Organization.findByUserId(orgAccount.id);
-
-        if (orgProfile && orgProfile.describes_me === 'Film Festival / Event Organizer') {
-          const [orgFestivalRows] = await query(
-            `SELECT 1
-               FROM events e
-              WHERE e.user_id = ? AND e.event_type = 'film_festival'
-                AND (e.is_deleted = 0 OR e.is_deleted IS NULL)
-              UNION
-             SELECT 1
-               FROM film_festivals ff
-              WHERE ff.user_id = ?
-                AND (ff.is_deleted = 0 OR ff.is_deleted IS NULL)
-              LIMIT 1`,
-            [orgAccount.id, orgAccount.id]
-          );
-
-          if (orgFestivalRows.length > 0) {
-            return res.status(403).json({
-              success: false,
-              message: 'Access restricted: This account is not permitted to access this resource.'
-            });
-          }
-        }
-      }
 
       const profile = userWithProfile.profile;
 
@@ -898,7 +867,7 @@ class AuthController {
       }
 
       // Fetch list of festivals with per-festival roles
-      const authPrefix = (process.env.auth_image_url_prefix || 'https://api.autovertest.com/api/v1/retrieve-media').replace(/\/+$/, '');
+      const authPrefix = (process.env.non_auth_image_url_prefix || process.env.auth_image_url_prefix || 'https://api.autovertest.com/api/v1/non-auth-user/retrieve-media').replace(/\/+$/, '');
       let formattedFestivals;
 
       if (isOwner) {
@@ -938,7 +907,7 @@ class AuthController {
         message: 'Profile details fetched successfully',
         data: {
           user_id: userWithProfile.id,
-          account_type: userWithProfile.account_type,
+          accountType: userWithProfile.account_type,
           name: profile ? profile.name : null,
           username: profile ? profile.username : null,
           profile_pic: profile ? profile.profile_pic : null,

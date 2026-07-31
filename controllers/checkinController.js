@@ -247,6 +247,7 @@ class CheckinController {
             registration_type: 'N/A',
             venue: 'N/A',
             email:'N/A',
+            phone:'N/A',
             entry_status: 'Invalid / Unassigned QR'
           }
         });
@@ -307,6 +308,7 @@ class CheckinController {
             registration_type: reg.registration_type || 'N/A',
             venue: venueName,
             email: reg.email || 'N/A',
+            phone: reg.phone || 'N/A',
             entry_status: reg.status || 'Checked In'
           }
         });
@@ -363,6 +365,7 @@ class CheckinController {
           registration_type: reg.registration_type || 'N/A',
           venue: venueName,
           email: reg.email || 'N/A',
+          phone: reg.phone || 'N/A',
           entry_status: reg.status || 'Checked In'
         }
       });

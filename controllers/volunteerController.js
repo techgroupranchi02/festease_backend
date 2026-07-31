@@ -122,7 +122,7 @@ class VolunteerController {
       `, [...selectParams, ...params]);
 
       // Attach profile pic URLs and parse roles
-      const authPrefix = (process.env.auth_image_url_prefix || 'https://api.autovertest.com/api/v1/retrieve-media').replace(/\/+$/, '');
+      const authPrefix = (process.env.non_auth_image_url_prefix || process.env.auth_image_url_prefix || 'https://api.autovertest.com/api/v1/non-auth-user/retrieve-media').replace(/\/+$/, '');
       const data = rows.map(row => {
         let roles = [];
         if (row.sv_roles) {
@@ -210,7 +210,7 @@ class VolunteerController {
       }
 
       const row = rows[0];
-      const authPrefix = process.env.auth_image_url_prefix || '';
+      const authPrefix = (process.env.non_auth_image_url_prefix || process.env.auth_image_url_prefix || 'https://api.autovertest.com/api/v1/non-auth-user/retrieve-media').replace(/\/+$/, '');
       return res.json({
         success: true,
         data: {

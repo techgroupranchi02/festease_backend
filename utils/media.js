@@ -3,7 +3,7 @@
  */
 
 function getMediaBaseUrl() {
-  const prefix = process.env.auth_image_url_prefix || process.env.AUTH_IMAGE_URL_PREFIX || 'https://api.autovertest.com/api/v1/retrieve-media';
+  const prefix = process.env.non_auth_image_url_prefix || process.env.auth_image_url_prefix || process.env.AUTH_IMAGE_URL_PREFIX || 'https://api.autovertest.com/api/v1/non-auth-user/retrieve-media';
   return prefix.replace(/\/+$/, '');
 }
 
@@ -14,10 +14,10 @@ function getMediaBaseUrl() {
 function getProfilePic(imageName) {
   if (!imageName) return null;
   const baseUrl = getMediaBaseUrl();
-  if (baseUrl.includes('api/v1/retrieve-media')) {
+  if (baseUrl.includes('retrieve-media')) {
     return `${baseUrl}/images/users/${imageName}`;
   }
-  return `${baseUrl}/api/v1/retrieve-media/images/users/${imageName}`;
+  return `${baseUrl}/api/v1/non-auth-user/retrieve-media/images/users/${imageName}`;
 }
 
 /**
@@ -27,10 +27,10 @@ function getProfilePic(imageName) {
 function getThumbnailPic(imageName) {
   if (!imageName) return null;
   const baseUrl = getMediaBaseUrl();
-  if (baseUrl.includes('api/v1/retrieve-media')) {
+  if (baseUrl.includes('retrieve-media')) {
     return `${baseUrl}/images/users/thumb_${imageName}`;
   }
-  return `${baseUrl}/api/v1/retrieve-media/images/users/thumb_${imageName}`;
+  return `${baseUrl}/api/v1/non-auth-user/retrieve-media/images/users/thumb_${imageName}`;
 }
 
 module.exports = {

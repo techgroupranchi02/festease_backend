@@ -51,7 +51,7 @@ class DashboardController {
         [festivalId]
       );
 
-      const authPrefix = (process.env.auth_image_url_prefix || 'https://api.autovertest.com/api/v1/retrieve-media').replace(/\/+$/, '');
+      const authPrefix = (process.env.non_auth_image_url_prefix || process.env.auth_image_url_prefix || 'https://api.autovertest.com/api/v1/non-auth-user/retrieve-media').replace(/\/+$/, '');
       const eventDetails = festRows.length > 0 ? {
         event_name: festRows[0].event_name,
         logo: festRows[0].film_festival_logo_image_name ? `${authPrefix}/images/film-festivals/${festRows[0].film_festival_logo_image_name}` : null,
@@ -130,7 +130,7 @@ class DashboardController {
       }
       // ──────────────────────────────────────────────────────────────────────
 
-      const authPrefix = (process.env.auth_image_url_prefix || 'https://api.autovertest.com/api/v1/retrieve-media').replace(/\/+$/, '');
+      const authPrefix = (process.env.non_auth_image_url_prefix || process.env.auth_image_url_prefix || 'https://api.autovertest.com/api/v1/non-auth-user/retrieve-media').replace(/\/+$/, '');
       const eventDetails = festRows.length > 0 ? {
         event_name: festRows[0].event_name,
         logo: festRows[0].film_festival_logo_image_name ? `${authPrefix}/images/film-festivals/${festRows[0].film_festival_logo_image_name}` : null,

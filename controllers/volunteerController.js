@@ -12,7 +12,7 @@ class VolunteerController {
     try {
       const page = parseInt(req.query.page) || 1;
       const search = req.query.search ? `%${req.query.search}%` : null;
-      const perPage = 10;
+      const perPage = 12;
       const offset = (page - 1) * perPage;
 
       const conditions = [

@@ -11,129 +11,129 @@ const { validate, rules, sendValidationError } = require('../middlewares/validat
 class AuthController {
 
 
-    /**
-     * POST /api/auth/generate-token
-     */
-    static async generateSaasToken(req, res) {
-        try {
-            let { user_id } = req.body || {};
-            if (typeof user_id === 'string') {
-                user_id = parseInt(user_id, 10);
-            }
+  /**
+   * POST /api/auth/generate-token
+   */
+  static async generateSaasToken(req, res) {
+    try {
+      let { user_id } = req.body || {};
+      if (typeof user_id === 'string') {
+        user_id = parseInt(user_id, 10);
+      }
 
-            // --- Input Validation ---
-            const result = validate(req.body, {
-                user_id: [rules.required(), rules.positiveInt()],
-            });
-            if (!result.valid) return sendValidationError(res, result.errors);
+      // --- Input Validation ---
+      const result = validate(req.body, {
+        user_id: [rules.required(), rules.positiveInt()],
+      });
+      if (!result.valid) return sendValidationError(res, result.errors);
 
-            // 1. Fetch user
-            const user = await User.findById(user_id);
-            if (!user) {
-                return res.status(404).json({
-                    success: false,
-                    message: 'User not found.'
-                });
-            }
+      // 1. Fetch user
+      const user = await User.findById(user_id);
+      if (!user) {
+        return res.status(404).json({
+          success: false,
+          message: 'User not found.'
+        });
+      }
 
-            // 2. Verify user has an event with event_type = 'film_festival'
-            const hasFestivalEvent = await Event.hasFilmFestivalEvent(user.id);
-            if (!hasFestivalEvent) {
-                return res.status(403).json({
-                    success: false,
-                    message: 'Access restricted: Only users associated with film festival events or registered as volunteers can generate tokens.'
-                });
-            }
+      // 2. Verify user has an event with event_type = 'film_festival'
+      const hasFestivalEvent = await Event.hasFilmFestivalEvent(user.id);
+      if (!hasFestivalEvent) {
+        return res.status(403).json({
+          success: false,
+          message: 'Access restricted: Only users associated with film festival events or registered as volunteers can generate tokens.'
+        });
+      }
 
-            // 3. Resolve film_festival_id for this user
-            const filmFestivalId = await Event.getFilmFestivalIdForUser(user.id);
+      // 3. Resolve film_festival_id for this user
+      const filmFestivalId = await Event.getFilmFestivalIdForUser(user.id);
 
-            // 4. Generate RS256 Asymmetric JWT Token
-            const tokenPayload = {
-                user_id: user.id,
-                sub: user.id,
-                userId: user.id,
-                email: user.email,
-                account_type: user.account_type,
-                film_festival_id: filmFestivalId
-            };
+      // 4. Generate RS256 Asymmetric JWT Token
+      const tokenPayload = {
+        user_id: user.id,
+        sub: user.id,
+        userId: user.id,
+        email: user.email,
+        account_type: user.account_type,
+        film_festival_id: filmFestivalId
+      };
 
-            const token = generateToken(tokenPayload, '24h');
-            return res.json({
-                success: true,
-                message: 'Token generated successfully',
-                token,
-                user: {
-                    user_id: user.id,
-                    accountType: user.account_type,
-                    email: user.email,
-                    film_festival_id: filmFestivalId
-                }
-            });
-
-        } catch (error) {
-            console.error('generateToken error:', error.message);
-            return res.status(500).json({
-                success: false,
-                message: 'An internal error occurred while generating the token.'
-            });
+      const token = generateToken(tokenPayload, '24h');
+      return res.json({
+        success: true,
+        message: 'Token generated successfully',
+        token,
+        user: {
+          user_id: user.id,
+          accountType: user.account_type,
+          email: user.email,
+          film_festival_id: filmFestivalId
         }
+      });
+
+    } catch (error) {
+      console.error('generateToken error:', error.message);
+      return res.status(500).json({
+        success: false,
+        message: 'An internal error occurred while generating the token.'
+      });
     }
+  }
 
-    /**
-     * POST /api/auth/generate-freecomers-token
-     */
-    static async generateFreecomersToken(req, res) {
-        try {
-            const authHeader = req.headers.authorization;
-            const token = authHeader && authHeader.startsWith('Bearer ') ? authHeader.split(' ')[1] : req.body.token;
+  /**
+   * POST /api/auth/generate-freecomers-token
+   */
+  static async generateFreecomersToken(req, res) {
+    try {
+      const authHeader = req.headers.authorization;
+      const token = authHeader && authHeader.startsWith('Bearer ') ? authHeader.split(' ')[1] : req.body.token;
 
-            if (!token) {
-                return res.status(401).json({
-                    success: false,
-                    message: 'Authorization token is required.'
-                });
-            }
+      if (!token) {
+        return res.status(401).json({
+          success: false,
+          message: 'Authorization token is required.'
+        });
+      }
 
-            const backendUrl = (process.env.FREECOMERS_BACKEND_URL || 'https://api.autovertest.com/').replace(/\/$/, '');
-            const frontendUrl = (process.env.FREECOMERS_FRONTEND_URL || 'https://autovertest.com/').replace(/\/$/, '');
+      const backendUrl = (process.env.FREECOMERS_BACKEND_URL || 'https://api.autovertest.com/').replace(/\/$/, '');
+      const frontendUrl = (process.env.FREECOMERS_FRONTEND_URL || 'https://autovertest.com/').replace(/\/$/, '');
 
-            // Call Freecomers backend endpoint to get freecomers token/verification
-            let freecomersToken = token;
-            try {
-                const response = await fetch(`${backendUrl}/api/v1/user/saas-to-freecomers`, {
-                    method: 'POST',
-                    headers: {
-                        'Content-Type': 'application/json',
-                        'Authorization': `Bearer ${token}`
-                    }
-                });
+      // Call Freecomers backend endpoint to get freecomers token/verification
+      let freecomersToken = token;
+      try {
+        const response = await fetch(`${backendUrl}/api/v1/user/saas-to-freecomers`, {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+            'Authorization': `Bearer ${token}`
+          }
+        });
 
-                const responseText = await response.text();
-                if (responseText && responseText.trim().startsWith('{')) {
-                    const data = JSON.parse(responseText);
-                    freecomersToken = data.token || data.data?.token || token;
-                }
-            } catch (err) {
-                console.warn('Freecomers remote endpoint verification fallback:', err.message);
-            }
-
-            const redirectUrl = `${frontendUrl}/saas-to-freecomers?token=${encodeURIComponent(freecomersToken)}`;
-
-            return res.json({
-                success: true,
-                message: 'Token verified successfully',
-                redirect_url: redirectUrl
-            });
-        } catch (error) {
-            console.error('generateFreecomersToken error:', error.message);
-            return res.status(500).json({
-                success: false,
-                message: 'An internal error occurred while generating the Freecomers token.',
-                error: error.message
-            });
+        const responseText = await response.text();
+        if (responseText && responseText.trim().startsWith('{')) {
+          const data = JSON.parse(responseText);
+          freecomersToken = data.token || data.data?.token || token;
         }
+      } catch (err) {
+        console.warn('Freecomers remote endpoint verification fallback:', err.message);
+      }
+
+      const redirectUrl = `${frontendUrl}/saas-to-freecomers?token=${encodeURIComponent(freecomersToken)}`;
+
+      return res.json({
+        success: true,
+        message: 'Token verified successfully',
+        redirect_url: redirectUrl
+      });
+    } catch (error) {
+      console.error('generateFreecomersToken error:', error.message);
+      return res.status(500).json({
+        success: false,
+        message: 'An internal error occurred while generating the Freecomers token.',
+        error: error.message
+      });
     }
+  }
 
 
 
@@ -151,8 +151,8 @@ class AuthController {
    * Redirects the browser to Google's OAuth consent screen.
    */
   static googleRedirect(req, res) {
-    const clientId     = process.env.GOOGLE_CLIENT_ID;
-    const redirectUri  = process.env.GOOGLE_REDIRECT_URI;
+    const clientId = process.env.GOOGLE_CLIENT_ID;
+    const redirectUri = process.env.GOOGLE_REDIRECT_URL;
 
     if (!clientId || !redirectUri) {
       return res.status(500).json({ success: false, message: 'Google OAuth is not configured on the server.' });
@@ -170,12 +170,12 @@ class AuthController {
     const state = accountType ? Buffer.from(JSON.stringify({ accountType: accountType.trim().toLowerCase() })).toString('base64') : '';
 
     const params = new URLSearchParams({
-      client_id:     clientId,
-      redirect_uri:  redirectUri,
+      client_id: clientId,
+      redirect_uri: redirectUri,
       response_type: 'code',
-      scope:         'openid email profile',
-      access_type:   'online',
-      prompt:        'select_account',
+      scope: 'openid email profile',
+      access_type: 'online',
+      prompt: 'select_account',
       ...(state ? { state } : {}),
     });
 
@@ -209,9 +209,9 @@ class AuthController {
         }
       }
 
-      const clientId     = process.env.GOOGLE_CLIENT_ID;
+      const clientId = process.env.GOOGLE_CLIENT_ID;
       const clientSecret = process.env.GOOGLE_CLIENT_SECRET;
-      const redirectUri  = process.env.GOOGLE_REDIRECT_URI;
+      const redirectUri = process.env.GOOGLE_REDIRECT_URL;
 
       // 1. Exchange authorization code for tokens
       let accessToken;
@@ -221,10 +221,10 @@ class AuthController {
           headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
           body: new URLSearchParams({
             code,
-            client_id:     clientId,
+            client_id: clientId,
             client_secret: clientSecret,
-            redirect_uri:  redirectUri,
-            grant_type:    'authorization_code',
+            redirect_uri: redirectUri,
+            grant_type: 'authorization_code',
           }).toString(),
         });
         const tokenData = await tokenRes.json();
@@ -267,11 +267,11 @@ class AuthController {
         }
       }
 
-      let selectedUser     = null;
-      let selectedProfile  = null;
+      let selectedUser = null;
+      let selectedProfile = null;
       let isFestivalAuthorized = false;
-      let isSaasDisabled   = false;
-      let isUserInactive   = false;
+      let isSaasDisabled = false;
+      let isUserInactive = false;
       let volunteerErrorReason = null;
 
       for (const candidateUser of matchingUsers) {
@@ -312,7 +312,7 @@ class AuthController {
                   if (!volunteerErrorReason) volunteerErrorReason = 'volunteer_expired';
                 } else {
                   const nonExpiredRows = allVolRows.filter(r => !r.expiry_date || new Date(r.expiry_date) > new Date());
-                  const hasActive      = nonExpiredRows.some(r => r.status === 'active');
+                  const hasActive = nonExpiredRows.some(r => r.status === 'active');
                   if (!hasActive && !volunteerErrorReason) volunteerErrorReason = 'volunteer_disabled';
                 }
               }
@@ -357,11 +357,11 @@ class AuthController {
 
         if (isAuthorizedForCandidate) {
           isFestivalAuthorized = true;
-          const userWithProfile  = await User.getProfile(candidateUser.id);
+          const userWithProfile = await User.getProfile(candidateUser.id);
           const candidateProfile = userWithProfile ? userWithProfile.profile : null;
 
           if (!selectedUser || (candidateProfile?.image_name && !selectedProfile?.image_name)) {
-            selectedUser    = candidateUser;
+            selectedUser = candidateUser;
             selectedProfile = candidateProfile;
           }
         }
@@ -385,7 +385,7 @@ class AuthController {
       }
 
       // 4. Check ownership & build roles
-      const [eventsRows]    = await query('SELECT 1 FROM events WHERE user_id = ? AND (is_deleted = 0 OR is_deleted IS NULL) LIMIT 1', [selectedUser.id]);
+      const [eventsRows] = await query('SELECT 1 FROM events WHERE user_id = ? AND (is_deleted = 0 OR is_deleted IS NULL) LIMIT 1', [selectedUser.id]);
       const [festivalsRows] = await query('SELECT 1 FROM film_festivals WHERE user_id = ? AND (is_deleted = 0 OR is_deleted IS NULL) LIMIT 1', [selectedUser.id]);
       const isOwner = eventsRows.length > 0 || festivalsRows.length > 0;
 
@@ -397,7 +397,7 @@ class AuthController {
         loginFestivals = ownerFestivals.map(f => ({
           event_id: f.event_id, festival_id: f.festival_id, name: f.event_name,
           banner: f.festival_banner ? `${authPrefix}/images/film-festivals/${f.festival_banner}` : null,
-          logo:   f.festival_logo   ? `${authPrefix}/images/film-festivals/${f.festival_logo}`   : null,
+          logo: f.festival_logo ? `${authPrefix}/images/film-festivals/${f.festival_logo}` : null,
           roles: ['admin', 'registration', 'checkin'],
         }));
       } else {
@@ -411,7 +411,7 @@ class AuthController {
           return {
             event_id: f.event_id, festival_id: f.festival_id, name: f.event_name,
             banner: f.festival_banner ? `${authPrefix}/images/film-festivals/${f.festival_banner}` : null,
-            logo:   f.festival_logo   ? `${authPrefix}/images/film-festivals/${f.festival_logo}`   : null,
+            logo: f.festival_logo ? `${authPrefix}/images/film-festivals/${f.festival_logo}` : null,
             roles: parsedRoles,
           };
         });
@@ -423,10 +423,10 @@ class AuthController {
 
       // 6. Generate JWT and redirect to frontend
       const tokenPayload = {
-        user_id:      selectedUser.id,
-        sub:          selectedUser.id,
-        userId:       selectedUser.id,
-        email:        selectedUser.email,
+        user_id: selectedUser.id,
+        sub: selectedUser.id,
+        userId: selectedUser.id,
+        email: selectedUser.email,
         account_type: selectedUser.account_type,
       };
       const jwtToken = generateToken(tokenPayload, '24h');
@@ -463,8 +463,8 @@ class AuthController {
 
       // --- Input Validation ---
       const validationRules = {
-        email:       [rules.required(), rules.email(), rules.maxLength(255)],
-        password:    [rules.required(), rules.string(), rules.maxLength(128)],
+        email: [rules.required(), rules.email(), rules.maxLength(255)],
+        password: [rules.required(), rules.string(), rules.maxLength(128)],
         accountType: [rules.required(), rules.string(), rules.inList(['individual', 'organization'])],
       };
       const result = validate({ ...req.body, accountType }, validationRules);
@@ -553,7 +553,7 @@ class AuthController {
                   if (!volunteerErrorReason) volunteerErrorReason = 'volunteer_expired';
                 } else {
                   const nonExpiredRows = allVolRows.filter(r => !r.expiry_date || new Date(r.expiry_date) > new Date());
-                  const hasActive      = nonExpiredRows.some(r => r.status === 'active');
+                  const hasActive = nonExpiredRows.some(r => r.status === 'active');
                   if (!hasActive && !volunteerErrorReason) volunteerErrorReason = 'volunteer_disabled';
                 }
               }
@@ -598,11 +598,11 @@ class AuthController {
 
         if (isAuthorizedForCandidate) {
           isFestivalAuthorized = true;
-          const userWithProfile  = await User.getProfile(candidateUser.id);
+          const userWithProfile = await User.getProfile(candidateUser.id);
           const candidateProfile = userWithProfile ? userWithProfile.profile : null;
 
           if (!selectedUser || (candidateProfile?.image_name && !selectedProfile?.image_name)) {
-            selectedUser    = candidateUser;
+            selectedUser = candidateUser;
             selectedProfile = candidateProfile;
           }
         }

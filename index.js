@@ -1,4 +1,4 @@
-require('dotenv').config();
+require('dotenv').config({ override: true });
 const express = require('express');
 const { testConnection } = require('./config/db');
 const routes = require('./routes/routes');
@@ -90,7 +90,7 @@ app.use((req, res, next) => {
   res.setHeader('Access-Control-Allow-Headers', 'Content-Type, Authorization');
   res.setHeader('X-Content-Type-Options', 'nosniff');
   res.setHeader('X-Frame-Options', 'DENY');
-  
+
   if (req.method === 'OPTIONS') {
     return res.sendStatus(200);
   }

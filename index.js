@@ -90,6 +90,8 @@ app.use((req, res, next) => {
   res.setHeader('Access-Control-Allow-Headers', 'Content-Type, Authorization');
   res.setHeader('X-Content-Type-Options', 'nosniff');
   res.setHeader('X-Frame-Options', 'DENY');
+  // Allow PWA service workers full scope
+  res.setHeader('Service-Worker-Allowed', '/');
 
   if (req.method === 'OPTIONS') {
     return res.sendStatus(200);
@@ -97,15 +99,17 @@ app.use((req, res, next) => {
   next();
 });
 
+// Serve static assets from public and assets directories
+app.use(express.static(path.join(__dirname, 'public')));
+app.use('/assets', express.static(path.join(__dirname, 'assets')));
+
 // Direct /health route (http://147.93.105.85:5000/health)
 app.get('/health', SystemController.getHealth);
 
-// Root endpoint
+// Root endpoint - FestEase Landing Page
 app.get('/', (req, res) => {
-  res.json({
-    message: 'FestEase Backend API Server is running',
-    status: 'online'
-  });
+  res.setHeader('Cache-Control', 'no-cache, no-store, must-revalidate');
+  res.sendFile(path.join(__dirname, 'public', 'index.html'));
 });
 
 // Mount Central API Router (/api)

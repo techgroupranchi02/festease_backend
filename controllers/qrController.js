@@ -65,12 +65,13 @@ class QrController {
 
   static async getUnusedQrData(req, res) {
     try {
+      const festivalId = parseInt(req.params.festival_id) || (req.query.festival_id ? parseInt(req.query.festival_id) : null);
       const search = req.query.search || req.query.q || '';
       const status = req.query.status || 'all';
       const page = parseInt(req.query.page) || 1;
       const perPage = req.query.per_page || req.query.perPage || req.query.limit || 1000;
 
-      const result = await SaasQr.getUnusedQrData({ search, status, page, perPage });
+      const result = await SaasQr.getUnusedQrData({ search, status, page, perPage, festivalId });
 
       return res.status(200).json({
         success: true,
@@ -97,14 +98,14 @@ class QrController {
    */
   static async getPreListQrData(req, res) {
     try {
-      const festivalId = parseInt(req.params.festival_id) || null;
+      const festivalId = parseInt(req.params.festival_id) || (req.query.festival_id ? parseInt(req.query.festival_id) : null);
       const search = req.query.search || req.query.q || '';
       const status = req.query.status || 'all';
       const page = parseInt(req.query.page) || 1;
       const perPage = req.query.per_page || req.query.perPage || req.query.limit || 1000;
       const includeImage = req.query.include_image === 'true' || req.query.image === 'true';
 
-      const result = await SaasQr.getUnusedQrData({ search, status, page, perPage });
+      const result = await SaasQr.getUnusedQrData({ search, status, page, perPage, festivalId });
 
       const dataWithPaseto = await Promise.all(
         result.data.map(async (item) => {

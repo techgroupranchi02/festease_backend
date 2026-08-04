@@ -1,4 +1,5 @@
 const SaasAttendee = require('../models/SaasAttendee');
+const SaasUnregisteredAttendee = require('../models/SaasUnregisteredAttendee');
 const SaasQr = require('../models/SaasQr');
 const FestivalVenue = require('../models/FestivalVenue');
 const multer = require('multer');
@@ -12,15 +13,25 @@ const { query } = require('../config/db');
 const { encryptQrPayload } = require('../utils/paseto');
 const { sendTicketEmail } = require('../utils/mailer');
 
-// Multer: in-memory CSV upload
+const XLSX = require('xlsx');
+
+// Multer: in-memory CSV & Excel upload
 const upload = multer({
   storage: multer.memoryStorage(),
-  limits: { fileSize: 5 * 1024 * 1024 }, // 5 MB
+  limits: { fileSize: 10 * 1024 * 1024 }, // 10 MB
   fileFilter: (req, file, cb) => {
-    if (file.mimetype === 'text/csv' || path.extname(file.originalname).toLowerCase() === '.csv') {
+    const ext = path.extname(file.originalname).toLowerCase();
+    const allowedExts = ['.csv', '.xlsx', '.xls'];
+    const allowedMimeTypes = [
+      'text/csv',
+      'application/csv',
+      'application/vnd.ms-excel',
+      'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet'
+    ];
+    if (allowedExts.includes(ext) || allowedMimeTypes.includes(file.mimetype)) {
       cb(null, true);
     } else {
-      cb(new Error('Only CSV files are allowed.'));
+      cb(new Error('Only CSV and Excel (.xlsx, .xls) files are allowed.'));
     }
   }
 });
@@ -122,14 +133,10 @@ class RegistrationController {
 
           const csvHeaders = Object.keys(rows[0]).map(k => k.toLowerCase().replace(/_/g, ' ').trim());
           const hasName = csvHeaders.includes('name');
-          const hasEmail = csvHeaders.includes('email');
-          const hasPhone = csvHeaders.includes('phone');
           const hasCategory = csvHeaders.includes('delegate category') || csvHeaders.includes('delegate_category') || csvHeaders.includes('delegatecategory') || csvHeaders.includes('category');
 
           const missing = [];
           if (!hasName) missing.push('name');
-          if (!hasEmail) missing.push('email');
-          if (!hasPhone) missing.push('phone');
           if (!hasCategory) missing.push('delegate category');
 
           if (missing.length) {
@@ -175,14 +182,12 @@ class RegistrationController {
         const { name, email, phone, qr_id: rawQrId, delegate_category, registration_type } = req.body;
         const qrId = rawQrId ? parseInt(rawQrId) : null;
 
-        //set
-
+        const cleanEmail = email && typeof email === 'string' && email.trim() !== '' ? email.trim() : null;
+        const cleanPhone = phone && typeof phone === 'string' && phone.trim() !== '' ? phone.trim() : null;
 
         // --- Validation ---
-        const result = validate(req.body, {
-          name:     [rules.required(), rules.string(), rules.maxLength(255)],
-          email:    [rules.required(), rules.email(),  rules.maxLength(255)],
-          phone:    [rules.required(), rules.string(), rules.minLength(10), rules.maxLength(30)],
+        const validationSchema = {
+          name: [rules.required(), rules.string(), rules.maxLength(255)],
           delegate_category: [
             rules.required(),
             rules.string(),
@@ -193,7 +198,16 @@ class RegistrationController {
             rules.string(),
             rules.inList(['Pre-Registered', 'On-Spot'])
           ]
-        });
+        };
+
+        if (cleanEmail) {
+          validationSchema.email = [rules.email(), rules.maxLength(255)];
+        }
+        if (cleanPhone) {
+          validationSchema.phone = [rules.string(), rules.minLength(10), rules.maxLength(30)];
+        }
+
+        const result = validate(req.body, validationSchema);
 
         // --- Validate qr_id if provided ---
         let qrRecord = null;
@@ -204,20 +218,27 @@ class RegistrationController {
 
           qrRecord = await SaasQr.findById(qrId);
           if (!qrRecord) {
-            return res.status(400).json({ success: false, message: `QR code with qr_id ${qrId} not found.` });
+            return res.status(400).json({ success: false, message: `QR ${qrId} does not exist.` });
           }
-
+          if (qrRecord.festival_id !== null && Number(qrRecord.festival_id) !== Number(festivalId)) {
+            return res.status(400).json({ success: false, message: 'This QR is not registered for this festival.' });
+          }
+          if (qrRecord.event_id !== null && Number(qrRecord.event_id) !== Number(eventId)) {
+            return res.status(400).json({ success: false, message: 'This QR is not registered for this event.' });
+          }
           if (qrRecord.attendee_id !== null) {
-            return res.status(400).json({ success: false, message: 'QR code provided already assigned to another attendee.' });
+            return res.status(400).json({ success: false, message: 'QR Already Assigned' });
           }
         }
 
         // Check if email already registered for this festival
-        const emailExists = await SaasAttendee.existsByEmail(email, festivalId);
-        if (emailExists) {
-          result.valid = false;
-          result.errors.email = result.errors.email || [];
-          result.errors.email.push('The email has already been registered for this festival.');
+        if (cleanEmail) {
+          const emailExists = await SaasAttendee.existsByEmail(cleanEmail, festivalId);
+          if (emailExists) {
+            result.valid = false;
+            result.errors.email = result.errors.email || [];
+            result.errors.email.push('The email has already been registered for this festival.');
+          }
         }
 
         if (!result.valid) return sendValidationError(res, result.errors);
@@ -238,7 +259,7 @@ class RegistrationController {
 
         // If a pre-listed qr_id was provided, link the attendee to the QR record
         if (qrId !== null) {
-          await SaasQr.assignAttendee(qrId, reg.id);
+          await SaasQr.assignAttendee(qrId, reg.id, festivalId, eventId);
         }
 
         // Build response: only generate PASETO token when no pre-listed QR was used
@@ -277,6 +298,144 @@ class RegistrationController {
         return res.status(500).json({ success: false, message: 'Registration failed.' });
       }
     });
+  }
+
+
+  /**
+   * POST /api/v1/festivals/:festival_id/registrations/bulk
+   * Bulk register attendees from uploaded CSV or Excel file into saas_unregistered_attendees table.
+   * Expects multipart/form-data with field "file" (.csv).
+   */
+  static bulkUnregisteredRegister(req, res) {
+    upload.single('file')(req, res, async (err) => {
+      if (err) {
+        return res.status(400).json({ success: false, message: err.message });
+      }
+
+      if (!req.file) {
+        return res.status(400).json({ success: false, message: 'File is required.' });
+      }
+
+      try {
+        const festivalId = parseInt(req.params.festival_id);
+        if (isNaN(festivalId)) {
+          return res.status(400).json({ success: false, message: 'Invalid festival_id.' });
+        }
+
+        // Fetch event_id from film_festivals table
+        const [festRows] = await query(
+          'SELECT event_id FROM film_festivals WHERE film_festival_id = ? AND (is_deleted = 0 OR is_deleted IS NULL) LIMIT 1',
+          [festivalId]
+        );
+        if (festRows.length === 0) {
+          return res.status(404).json({ success: false, message: 'Film festival not found.' });
+        }
+        const eventId = festRows[0].event_id;
+
+        // Parse CSV or Excel file
+        let records = [];
+        const fileExt = path.extname(req.file.originalname).toLowerCase();
+
+        try {
+          if (fileExt === '.xlsx' || fileExt === '.xls' || req.file.mimetype.includes('excel') || req.file.mimetype.includes('spreadsheetml')) {
+            const workbook = XLSX.read(req.file.buffer, { type: 'buffer' });
+            const firstSheetName = workbook.SheetNames[0];
+            const worksheet = workbook.Sheets[firstSheetName];
+            records = XLSX.utils.sheet_to_json(worksheet, { defval: '' });
+          } else {
+            try {
+              records = parse(req.file.buffer, {
+                columns: true,
+                skip_empty_lines: true,
+                trim: true,
+              });
+            } catch (csvErr) {
+              const workbook = XLSX.read(req.file.buffer, { type: 'buffer' });
+              const firstSheetName = workbook.SheetNames[0];
+              const worksheet = workbook.Sheets[firstSheetName];
+              records = XLSX.utils.sheet_to_json(worksheet, { defval: '' });
+            }
+          }
+        } catch (parseErr) {
+          return res.status(400).json({ success: false, message: `Failed to parse file: ${parseErr.message}` });
+        }
+
+        if (!records || records.length === 0) {
+          return res.status(400).json({ success: false, message: 'Uploaded file is empty.' });
+        }
+
+        const getRowValue = (row, possibleKeys) => {
+          const rowKeys = Object.keys(row);
+          const key = rowKeys.find(k => possibleKeys.includes(k.toLowerCase().replace(/[\s_]/g, '')));
+          return key ? String(row[key] || '').trim() : '';
+        };
+
+        const attendeesToInsert = records.map(row => ({
+          name: getRowValue(row, ['name', 'fullname']) || null,
+          email: getRowValue(row, ['email', 'emailaddress']) || null,
+          phone_number: getRowValue(row, ['phonenumber', 'phone', 'mobile', 'mobilenumber']) || null,
+          delegate_category: getRowValue(row, ['delegatecategory', 'category']) || null,
+        }));
+
+        const insertedCount = await SaasUnregisteredAttendee.bulkCreate(festivalId, eventId, attendeesToInsert);
+
+        return res.status(201).json({
+          success: true,
+          message: `Successfully added ${insertedCount} attendee(s) to saas_unregistered_attendees.`,
+          data: {
+            festival_id: festivalId,
+            event_id: eventId,
+            inserted_count: insertedCount,
+          }
+        });
+
+      } catch (error) {
+        console.error('Bulk registration error:', error.message);
+        return res.status(500).json({ success: false, message: 'Bulk registration failed.' });
+      }
+    });
+  }
+
+
+  /**
+   * GET /api/v1/festivals/:festival_id/un-registered
+   * Get merged attendees (bulk unregistered and registered) with search, status filter, and pagination.
+   * Query params: page, limit (or per_page), search, delegate_category, registration_status (or status / is_registered)
+   */
+  static async bulkGetUnregistered(req, res) {
+    try {
+      const festivalId = parseInt(req.params.festival_id);
+      if (isNaN(festivalId)) {
+        return res.status(400).json({ success: false, message: 'Invalid festival_id.' });
+      }
+
+      const page = parseInt(req.query.page) || 1;
+      const limit = req.query.limit || req.query.per_page || 10;
+      const search = req.query.search || '';
+      const delegateCategory = req.query.delegate_category || req.query.delegateCategory || '';
+      const registrationStatus = req.query.registration_status || req.query.status || req.query.is_registered || '';
+
+      const result = await SaasUnregisteredAttendee.findWithPagination({
+        festivalId,
+        search,
+        page,
+        limit,
+        delegateCategory,
+        registrationStatus,
+      });
+
+      return res.status(200).json({
+        success: true,
+        data: result.data,
+        total: result.total,
+        page: result.page,
+        per_page: result.perPage,
+        total_pages: result.totalPages,
+      });
+    } catch (error) {
+      console.error('Bulk get error:', error.message);
+      return res.status(500).json({ success: false, message: 'Bulk get failed.' });
+    }
   }
 
   /**

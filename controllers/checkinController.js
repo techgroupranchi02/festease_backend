@@ -236,19 +236,21 @@ class CheckinController {
         return res.status(400).json({ success: false, message: 'QR token is required.' });
       }
 
-      // Helper to return Invalid / Unassigned QR response
-      const returnUnassigned = () => {
+      // Helper to return error response with specific entry_status and message
+      const returnError = (entryStatus, message) => {
         return res.status(400).json({
           success: false,
-          message: 'Invalid / Unassigned QR',
+          message: message || entryStatus,
           data: {
-            name: 'N/A',
-            category: 'N/A',
-            registration_type: 'N/A',
-            venue: 'N/A',
-            email:'N/A',
-            phone:'N/A',
-            entry_status: 'Invalid / Unassigned QR'
+            name: null,
+            category: null,
+            registration_type: null,
+            venue: null,
+            email: null,
+            phone: null,
+            entry_status: entryStatus,
+            registration_time: null,
+            checkin_time: null
           }
         });
       };
@@ -258,12 +260,12 @@ class CheckinController {
       try {
         payload = await decryptQrPayload(qr_token);
       } catch {
-        return returnUnassigned();
+        return returnError('Invalid QR', 'Invalid QR code.');
       }
 
       // Cross-check the festival embedded in the token against the route param (if present)
       if (payload.festival_id && payload.festival_id !== festivalId) {
-        return returnUnassigned();
+        return returnError('Different Festival QR', 'QR code belongs to a different festival.');
       }
 
       // --- Load attendee ---
@@ -272,16 +274,23 @@ class CheckinController {
       let reg;
       if (payload.qr_data) {
         const qrRecord = await SaasQr.findByQrData(payload.qr_data);
-        if (!qrRecord || !qrRecord.attendee_id) {
-          return returnUnassigned();
+        if (!qrRecord) {
+          return returnError('Invalid QR', 'Invalid QR code.');
+        }
+        if (!qrRecord.attendee_id) {
+          return returnError('Unassigned QR', 'QR code is unassigned.');
         }
         reg = await SaasAttendee.findById(parseInt(qrRecord.attendee_id));
       } else if (payload.attendee_id) {
         reg = await SaasAttendee.findById(parseInt(payload.attendee_id));
       }
 
-      if (!reg || reg.festival_id !== festivalId) {
-        return returnUnassigned();
+      if (!reg) {
+        return returnError('Invalid QR', 'Attendee registration not found.');
+      }
+
+      if (reg.festival_id !== festivalId) {
+        return returnError('Different Festival QR', 'QR code belongs to a different festival.');
       }
 
       // Check check-in status
@@ -290,83 +299,44 @@ class CheckinController {
       // Fetch venues for the festival to resolve names
       const venues = await FestivalVenue.findByFestivalId(festivalId);
 
-      // If already checked in
-      if (existing) {
-        let venueName = 'N/A';
-        if (existing.checkin_venue_id) {
-          const matchedVenue = venues.find(v => v.venue_id === existing.checkin_venue_id);
+      let venueName = null;
+      if (existing && existing.checkin_venue_id) {
+        const matchedVenue = venues.find(v => v.venue_id === existing.checkin_venue_id);
+        if (matchedVenue) {
+          venueName = matchedVenue.venue_name;
+        }
+      } else {
+        const checkin_venue_id = req.query.checkin_venue_id ? parseInt(req.query.checkin_venue_id) : null;
+        let resolvedVenueId = checkin_venue_id;
+        if (!resolvedVenueId && venues.length === 1) {
+          resolvedVenueId = venues[0].venue_id;
+        }
+        if (resolvedVenueId) {
+          const matchedVenue = venues.find(v => v.venue_id === resolvedVenueId);
           if (matchedVenue) {
             venueName = matchedVenue.venue_name;
           }
         }
-        return res.status(200).json({
-          success: true,
-          message: 'Already Checked In',
-          data: {
-            name: reg.name,
-            category: reg.delegate_category || 'N/A',
-            registration_type: reg.registration_type || 'N/A',
-            venue: venueName,
-            email: reg.email || 'N/A',
-            phone: reg.phone || 'N/A',
-            entry_status: reg.status || 'Checked In'
-          }
-        });
       }
 
-      // If not yet checked in, register check-in
-      const loggedInUserId = req.user.user_id;
+      const checkinTime = existing ? (existing.check_in_at || existing.created_at || null) : null;
+      const registrationTime = reg.registered_at || reg.created_at || null;
+      // const displayTime = existing ? checkinTime : registrationTime;
 
-      // Resolve roles
-      const [festivalRows] = await query(
-        'SELECT user_id FROM film_festivals WHERE film_festival_id = ? AND (is_deleted = 0 OR is_deleted IS NULL) LIMIT 1',
-        [festivalId]
-      );
-      const festivalOwnerUserId = festivalRows.length > 0 ? festivalRows[0].user_id : null;
-      const checkedInByRole = Number(loggedInUserId) === Number(festivalOwnerUserId) ? 'admin' : 'volunteer';
-
-      // Read checkin_venue_id from query parameters if present
-      const checkin_venue_id = req.query.checkin_venue_id ? parseInt(req.query.checkin_venue_id) : null;
-      const remarks = req.query.remarks || null;
-
-      // Default venue resolution: if no checkin_venue_id is specified but there is exactly 1 venue, default to it
-      let resolvedVenueId = checkin_venue_id;
-      if (!resolvedVenueId && venues.length === 1) {
-        resolvedVenueId = venues[0].venue_id;
-      }
-
-      // Create check-in
-      await SaasCheckin.create({
-        attendeeId:              reg.id,
-        eventId:                 reg.event_id,
-        festivalId,
-        checkinVenueId:          resolvedVenueId,
-        checkedInByUserId:       loggedInUserId,
-        checkedInByRole,
-        checkedInByVolunteerId:  checkedInByRole === 'volunteer' ? loggedInUserId : null,
-        remarks,
-      });
-
-      // Fetch venue name for the checked-in record
-      let venueName = 'N/A';
-      if (resolvedVenueId) {
-        const matchedVenue = venues.find(v => v.venue_id === resolvedVenueId);
-        if (matchedVenue) {
-          venueName = matchedVenue.venue_name;
-        }
-      }
-
-      return res.json({
+      return res.status(200).json({
         success: true,
-        message: `Festival entry granted for ${reg.name}`,
+        message: 'QR scan processed successfully.',
         data: {
           name: reg.name,
-          category: reg.delegate_category || 'N/A',
-          registration_type: reg.registration_type || 'N/A',
+          category: reg.delegate_category || null,
+          registration_type: reg.registration_type || null,
           venue: venueName,
-          email: reg.email || 'N/A',
-          phone: reg.phone || 'N/A',
-          entry_status: reg.status || 'Checked In'
+          email: SaasQr.maskEmail(reg.email),
+          phone: SaasQr.maskPhone(reg.phone),
+          entry_status: existing ? 'Checked In' : (reg.status === 'cancelled' ? 'Cancelled' : 'Not Checked In'),
+          // date_time: displayTime,
+          registration_time: registrationTime,
+          checkin_time: checkinTime
         }
       });
     } catch (err) {

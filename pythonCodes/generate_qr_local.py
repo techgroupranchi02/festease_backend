@@ -39,7 +39,7 @@ from pathlib import Path
 import mysql.connector
 import pyseto
 import qrcode
-from PIL import Image
+from PIL import Image, ImageDraw, ImageFont
 
 # ---------------------------------------------------------------------------
 # Configuration — read from environment (same values as .env)
@@ -60,7 +60,26 @@ PASERK = os.getenv(
     "k4.local.MfKRbhrKT3uJHvXzoC5iygI8XVq4sUlCFLLwJte_ETs",
 )
 
-DEFAULT_LOGO = str(SCRIPT_DIR / "assets" / "bisff_logo.png")
+def find_logo(specified_path: str = None) -> str | None:
+    """Auto-detect logo file from specified path or default directories (logo/, assets/)."""
+    if specified_path:
+        p = Path(specified_path)
+        if p.is_file():
+            return str(p)
+        if p.is_dir():
+            for ext in ("*.png", "*.jpg", "*.jpeg", "*.webp", "*.PNG", "*.JPG", "*.JPEG"):
+                matches = list(p.glob(ext))
+                if matches:
+                    return str(matches[0])
+
+    search_dirs = [SCRIPT_DIR / "logo", SCRIPT_DIR / "assets", SCRIPT_DIR]
+    for d in search_dirs:
+        if d.is_dir():
+            for ext in ("*.png", "*.jpg", "*.jpeg", "*.webp", "*.PNG", "*.JPG", "*.JPEG"):
+                matches = sorted(list(d.glob(ext)))
+                if matches:
+                    return str(matches[0])
+    return None
 
 
 # ---------------------------------------------------------------------------
@@ -111,9 +130,11 @@ def make_qr_with_logo(
     token: str,
     logo_path,      # str | None
     qr_size: int = 600,
+    qr_id = None,
 ) -> Image.Image:
     """
-    Render a PASETO token as a QR code and overlay a logo in the centre.
+    Render a PASETO token as a QR code, overlay a logo in the centre,
+    and write the qr_id below the QR code.
 
     Error-correction level H allows up to ~30 % of modules to be obscured,
     which is more than enough for a centre logo at 22 % of image width.
@@ -148,6 +169,43 @@ def make_qr_with_logo(
         cy = (qr_size - ch) // 2
         qr_img.paste(canvas, (cx, cy), mask=canvas)
 
+    if qr_id is not None:
+        label_height = int(qr_size * 0.18)
+        w, h = qr_img.size
+        final_img = Image.new("RGBA", (w, h + label_height), (255, 255, 255, 255))
+        final_img.paste(qr_img, (0, 0))
+
+        draw = ImageDraw.Draw(final_img)
+        text = " ".join(str(qr_id))
+
+        font_size = int(label_height * 0.75)
+        font = None
+        for font_name in ["arialbd.ttf", "arial.ttf", "dejavusans.ttf", "calibri.ttf"]:
+            try:
+                font = ImageFont.truetype(font_name, font_size)
+                break
+            except Exception:
+                pass
+
+        if font is None:
+            try:
+                font = ImageFont.load_default(size=font_size)
+            except Exception:
+                font = ImageFont.load_default()
+
+        if hasattr(draw, "textbbox"):
+            bbox = draw.textbbox((0, 0), text, font=font)
+            text_w = bbox[2] - bbox[0]
+            text_h = bbox[3] - bbox[1]
+            x = (w - text_w) // 2
+            y = h + (label_height - text_h) // 2 - bbox[1]
+        else:
+            x = w // 4
+            y = h + 10
+
+        draw.text((x, y), text, fill=(0, 0, 0, 255), font=font)
+        return final_img
+
     return qr_img
 
 
@@ -168,8 +226,8 @@ def main():
     )
     parser.add_argument(
         "--logo", "-l",
-        default=DEFAULT_LOGO,
-        help=f"Path to logo PNG (default: {DEFAULT_LOGO})",
+        default=None,
+        help="Path to logo image or folder (default: auto-detect from logo/ or assets/)",
     )
     parser.add_argument(
         "--size", "-s",
@@ -183,8 +241,6 @@ def main():
         help="Skip logo overlay and produce plain black-and-white QR codes",
     )
     args = parser.parse_args()
-
-    logo_path = None if args.no_logo else args.logo
 
     # ── 1. PASETO key ────────────────────────────────────────────────────────
     print("[*] Loading PASETO key …")
@@ -208,16 +264,21 @@ def main():
 
     print(f"[*] {len(rows)} record(s) found.")
 
-    if logo_path:
-        if Path(logo_path).exists():
-            print(f"[*] Logo: {logo_path}")
+    if args.no_logo:
+        logo_path = None
+    else:
+        logo_path = find_logo(args.logo)
+        if logo_path:
+            print(f"[*] Logo overlay enabled using: {logo_path}")
         else:
-            print(f"[!] Logo not found at '{logo_path}' — skipping logo overlay.")
-            logo_path = None
+            if args.logo:
+                print(f"[!] Logo not found at '{args.logo}' — skipping logo overlay.")
+            else:
+                print(f"[!] No logo found in 'logo/' or 'assets/' folders — skipping logo overlay.")
 
     # ── 3. Build ZIP in memory ────────────────────────────────────────────────
     output_path = Path(args.output)
-    print(f"[*] Writing → {output_path} …")
+    print(f"[*] Writing -> {output_path} ...")
 
     with zipfile.ZipFile(
         output_path, "w",
@@ -233,7 +294,7 @@ def main():
             }
             token = encrypt_qr_payload(key, payload)
 
-            img = make_qr_with_logo(token, logo_path, qr_size=args.size)
+            img = make_qr_with_logo(token, logo_path, qr_size=args.size, qr_id=row["qr_id"])
 
             buf = io.BytesIO()
             img.save(buf, format="PNG", optimize=True)
@@ -243,10 +304,10 @@ def main():
 
             # Progress every 10 or on last item
             if i % 10 == 0 or i == len(rows):
-                print(f"    {i}/{len(rows)} …", end="\r", flush=True)
+                print(f"    {i}/{len(rows)} ...", end="\r", flush=True)
 
     size_kb = output_path.stat().st_size / 1024
-    print(f"\n[✓] Done!  {len(rows)} QR code(s)  →  {output_path}  ({size_kb:.1f} KB)")
+    print(f"\n[+] Done!  {len(rows)} QR code(s)  ->  {output_path}  ({size_kb:.1f} KB)")
 
 
 if __name__ == "__main__":

@@ -31,15 +31,17 @@ class SaasAttendee {
    * @param {string} params.phone
    * @returns {{ id: number, qr_token: string }}
    */
-  static async create({ festivalId, eventId, registeredByUserId, registeredByRole, volunteerId = null, qrId = null, name, email, phone, delegateCategory = null, registrationType = null }) {
+  static async create({ festivalId, eventId, registeredByUserId, registeredByRole, volunteerId = null, qrId = null, name, email = null, phone = null, delegateCategory = null, registrationType = null }) {
     const qrToken = SaasAttendee._uuid();
+    const cleanEmail = email && typeof email === 'string' && email.trim() ? email.trim() : null;
+    const cleanPhone = phone && typeof phone === 'string' && phone.trim() ? phone.trim() : null;
     const [result] = await query(
       `INSERT INTO saas_attendees
          (event_id, festival_id, name, email, phone, delegate_category, registration_type,
           registered_by_user_id, registered_by_role, volunteer_id, qr_id,
           status, qr_token, registered_at)
        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'registered', ?, NOW())`,
-      [eventId, festivalId, name, email, phone, delegateCategory, registrationType,
+      [eventId, festivalId, name, cleanEmail, cleanPhone, delegateCategory, registrationType,
        registeredByUserId, registeredByRole, volunteerId || null, qrId || null,
        qrToken]
     );
@@ -54,7 +56,7 @@ class SaasAttendee {
    * @returns {boolean}
    */
   static async existsByEmail(email, festivalId) {
-    if (!email) return false;
+    if (!email || !email.trim()) return false;
     const [rows] = await query(
       'SELECT 1 FROM saas_attendees WHERE email = ? AND festival_id = ? AND status != \'cancelled\' LIMIT 1',
       [email.trim().toLowerCase(), festivalId]
@@ -92,7 +94,7 @@ class SaasAttendee {
         }
 
         const cleanPhone = (row.phone || '').trim();
-        if (!cleanPhone || cleanPhone.length < 10) {
+        if (cleanPhone && cleanPhone.length < 10) {
           throw new Error('Phone must be at least 10 characters.');
         }
 
@@ -126,8 +128,8 @@ class SaasAttendee {
           registeredByRole,
           volunteerId,
           name:  row.name,
-          email: row.email,
-          phone: row.phone || '',
+          email: cleanEmail || null,
+          phone: cleanPhone || null,
           delegateCategory: matchedCategory,
           registrationType: matchedType,
         });
@@ -348,20 +350,24 @@ class SaasAttendee {
     );
 
     // QR Passes stats
-    const [[{ total_qr_passes, unassigned_passes }]] = await query(
-      `SELECT 
-         COUNT(*) AS total_qr_passes,
-         COUNT(CASE WHEN attendee_id IS NULL THEN 1 END) AS unassigned_passes
-       FROM saas_qr`
-    );
-
     const [[{ festival_assigned_passes }]] = await query(
       `SELECT COUNT(DISTINCT q.qr_id) AS festival_assigned_passes
        FROM saas_qr q
-       JOIN saas_attendees a ON q.attendee_id = a.attendee_id
-       WHERE a.festival_id = ?`,
+       LEFT JOIN saas_attendees a ON q.attendee_id = a.attendee_id
+       WHERE (q.festival_id = ? OR a.festival_id = ?)
+         AND q.attendee_id IS NOT NULL`,
+      [festivalId, festivalId]
+    );
+
+    const [[{ unassigned_passes }]] = await query(
+      `SELECT COUNT(*) AS unassigned_passes
+       FROM saas_qr q
+       WHERE (q.festival_id = ? OR q.festival_id IS NULL)
+         AND q.attendee_id IS NULL`,
       [festivalId]
     );
+
+    const total_qr_passes = Number(festival_assigned_passes || 0) + Number(unassigned_passes || 0);
 
     // Venue-wise Attendance
     const FestivalVenue = require('./FestivalVenue');

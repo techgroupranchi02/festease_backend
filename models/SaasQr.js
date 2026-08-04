@@ -48,10 +48,20 @@ class SaasQr {
    * @param {number|null} [params.attendeeId=null]
    * @returns {Promise<{ id: number }>}
    */
-  static async create({ qrData, attendeeId = null }) {
+  /**
+   * Create a new QR code entry.
+   *
+   * @param {object} params
+   * @param {string} params.qrData
+   * @param {number|null} [params.attendeeId=null]
+   * @param {number|null} [params.festivalId=null]
+   * @param {number|null} [params.eventId=null]
+   * @returns {Promise<{ id: number }>}
+   */
+  static async create({ qrData, attendeeId = null, festivalId = null, eventId = null }) {
     const [result] = await query(
-      `INSERT INTO saas_qr (qr_data, attendee_id) VALUES (?, ?)`,
-      [qrData, attendeeId || null]
+      `INSERT INTO saas_qr (qr_data, attendee_id, festival_id, event_id) VALUES (?, ?, ?, ?)`,
+      [qrData, attendeeId || null, festivalId || null, eventId || null]
     );
     return { id: result.insertId };
   }
@@ -121,12 +131,18 @@ class SaasQr {
    *
    * @param {number} qrId
    * @param {number} attendeeId
+   * @param {number|null} [festivalId=null]
+   * @param {number|null} [eventId=null]
    * @returns {Promise<boolean>}
    */
-  static async assignAttendee(qrId, attendeeId) {
+  static async assignAttendee(qrId, attendeeId, festivalId = null, eventId = null) {
     const [result] = await query(
-      `UPDATE saas_qr SET attendee_id = ? WHERE qr_id = ?`,
-      [attendeeId, qrId]
+      `UPDATE saas_qr 
+       SET attendee_id = ?, 
+           festival_id = COALESCE(?, festival_id), 
+           event_id = COALESCE(?, event_id) 
+       WHERE qr_id = ?`,
+      [attendeeId, festivalId || null, eventId || null, qrId]
     );
     return result.affectedRows > 0;
   }
@@ -136,12 +152,18 @@ class SaasQr {
    *
    * @param {string} qrData
    * @param {number} attendeeId
+   * @param {number|null} [festivalId=null]
+   * @param {number|null} [eventId=null]
    * @returns {Promise<boolean>}
    */
-  static async assignAttendeeByQrData(qrData, attendeeId) {
+  static async assignAttendeeByQrData(qrData, attendeeId, festivalId = null, eventId = null) {
     const [result] = await query(
-      `UPDATE saas_qr SET attendee_id = ? WHERE qr_data = ?`,
-      [attendeeId, qrData]
+      `UPDATE saas_qr 
+       SET attendee_id = ?, 
+           festival_id = COALESCE(?, festival_id), 
+           event_id = COALESCE(?, event_id) 
+       WHERE qr_data = ?`,
+      [attendeeId, festivalId || null, eventId || null, qrData]
     );
     return result.affectedRows > 0;
   }
@@ -161,15 +183,30 @@ class SaasQr {
   }
 
   /**
-   * Find available (unassigned) QR codes.
+   * Find available (unassigned) QR codes for a festival/event or unallocated.
    *
    * @param {number} [limit=100]
+   * @param {number|null} [festivalId=null]
+   * @param {number|null} [eventId=null]
    * @returns {Promise<Array>}
    */
-  static async findAvailable(limit = 100) {
+  static async findAvailable(limit = 100, festivalId = null, eventId = null) {
+    const conditions = ['attendee_id IS NULL'];
+    const params = [];
+
+    if (festivalId) {
+      conditions.push('(festival_id = ? OR festival_id IS NULL)');
+      params.push(festivalId);
+    }
+    if (eventId) {
+      conditions.push('(event_id = ? OR event_id IS NULL)');
+      params.push(eventId);
+    }
+    params.push(limit);
+
     const [rows] = await query(
-      `SELECT * FROM saas_qr WHERE attendee_id IS NULL ORDER BY qr_id ASC LIMIT ?`,
-      [limit]
+      `SELECT * FROM saas_qr WHERE ${conditions.join(' AND ')} ORDER BY qr_id ASC LIMIT ?`,
+      params
     );
     return rows;
   }
@@ -191,6 +228,8 @@ class SaasQr {
    * @param {string} [options.search='']
    * @param {number} [options.page=1]
    * @param {number|string|null} [options.perPage=1000]
+   * @param {number|null} [options.festivalId=null]
+   * @param {number|null} [options.eventId=null]
    * @returns {Promise<{ data: Array, total: number, page: number, perPage: number|null }>}
    */
   static async getUnusedQrData(options = {}) {
@@ -198,6 +237,8 @@ class SaasQr {
     let page = 1;
     let perPage = 1000;
     let status = 'all';
+    let festivalId = null;
+    let eventId = null;
 
     if (typeof options === 'number') {
       perPage = options;
@@ -205,6 +246,8 @@ class SaasQr {
       search = options.search || '';
       status = options.status || options.assignedStatus || 'all';
       page = parseInt(options.page) || 1;
+      festivalId = options.festivalId || options.festival_id || null;
+      eventId = options.eventId || options.event_id || null;
       if (options.perPage !== undefined && options.perPage !== null) {
         perPage = options.perPage === 'all' ? null : (parseInt(options.perPage) || 1000);
       } else if (options.limit !== undefined && options.limit !== null) {
@@ -214,6 +257,16 @@ class SaasQr {
 
     const conditions = [];
     const params = [];
+
+    if (festivalId) {
+      conditions.push('(q.festival_id = ? OR q.festival_id IS NULL)');
+      params.push(festivalId);
+    }
+
+    if (eventId) {
+      conditions.push('(q.event_id = ? OR q.event_id IS NULL)');
+      params.push(eventId);
+    }
 
     if (status === 'unused' || status === 'unassigned') {
       conditions.push('q.attendee_id IS NULL');
@@ -288,11 +341,23 @@ class SaasQr {
    * @param {string} [params.assignedStatus] - 'assigned' | 'unassigned' | 'all'
    * @param {number} [params.page=1]
    * @param {number} [params.perPage=20]
+   * @param {number|null} [params.festivalId=null]
+   * @param {number|null} [params.eventId=null]
    * @returns {Promise<{ data: Array, total: number, page: number, perPage: number }>}
    */
-  static async search({ search = '', assignedStatus = 'all', page = 1, perPage = 20 }) {
+  static async search({ search = '', assignedStatus = 'all', page = 1, perPage = 20, festivalId = null, eventId = null }) {
     const conditions = [];
     const params = [];
+
+    if (festivalId) {
+      conditions.push('(q.festival_id = ? OR q.festival_id IS NULL)');
+      params.push(festivalId);
+    }
+
+    if (eventId) {
+      conditions.push('(q.event_id = ? OR q.event_id IS NULL)');
+      params.push(eventId);
+    }
 
     if (assignedStatus === 'assigned') {
       conditions.push('q.attendee_id IS NOT NULL');

@@ -194,7 +194,7 @@ class AuthController {
       const { code, error: oauthError, state } = req.query;
 
       if (oauthError || !code) {
-        return res.redirect(`${frontendUrl}/google-signin?error=${encodeURIComponent(oauthError || 'access_denied')}`);
+        return res.redirect(`${frontendUrl}/google-signin?error=${encodeURIComponent(oauthError || 'Access Denied')}`);
       }
 
       // Decode accountType from state param (set by googleRedirect)
@@ -234,7 +234,7 @@ class AuthController {
         accessToken = tokenData.access_token;
       } catch (err) {
         console.error('Google token exchange failed:', err.message);
-        return res.redirect(`${frontendUrl}/google-signin?error=${encodeURIComponent('token_exchange_failed')}`);
+        return res.redirect(`${frontendUrl}/google-signin?error=${encodeURIComponent('Token Exchange Failed')}`);
       }
 
       // 2. Fetch user info from Google
@@ -248,7 +248,7 @@ class AuthController {
         if (!googleEmail) throw new Error('No email in Google userinfo');
       } catch (err) {
         console.error('Google userinfo failed:', err.message);
-        return res.redirect(`${frontendUrl}/google-signin?error=${encodeURIComponent('user info failed')}`);
+        return res.redirect(`${frontendUrl}/google-signin?error=${encodeURIComponent('User Info Not Found')}`);
       }
 
       const cleanEmail = googleEmail.trim().toLowerCase();
@@ -256,14 +256,14 @@ class AuthController {
       // 3. Fetch all user accounts matching email
       let matchingUsers = await User.findAllByEmail(cleanEmail);
       if (!matchingUsers || matchingUsers.length === 0) {
-        return res.redirect(`${frontendUrl}/google-signin?error=${encodeURIComponent('no_account')}`);
+        return res.redirect(`${frontendUrl}/google-signin?error=${encodeURIComponent('Account Not Found')}`);
       }
 
       // Filter by accountType if provided (mirrors login behaviour)
       if (accountType) {
         matchingUsers = matchingUsers.filter(u => u.account_type === accountType);
         if (matchingUsers.length === 0) {
-          return res.redirect(`${frontendUrl}/google-signin?error=${encodeURIComponent('no_account')}`);
+          return res.redirect(`${frontendUrl}/google-signin?error=${encodeURIComponent('Account Not Found')}`);
         }
       }
 
@@ -305,15 +305,15 @@ class AuthController {
                 [candidateUser.id]
               );
               if (allVolRows.length === 0) {
-                if (!volunteerErrorReason) volunteerErrorReason = 'not_a_volunteer';
+                if (!volunteerErrorReason) volunteerErrorReason = 'Not A Volunteer';
               } else {
                 const hasNonExpired = allVolRows.some(r => !r.expiry_date || new Date(r.expiry_date) > new Date());
                 if (!hasNonExpired) {
-                  if (!volunteerErrorReason) volunteerErrorReason = 'volunteer_expired';
+                  if (!volunteerErrorReason) volunteerErrorReason = 'Volunteer Expired';
                 } else {
                   const nonExpiredRows = allVolRows.filter(r => !r.expiry_date || new Date(r.expiry_date) > new Date());
                   const hasActive = nonExpiredRows.some(r => r.status === 'active');
-                  if (!hasActive && !volunteerErrorReason) volunteerErrorReason = 'volunteer_disabled';
+                  if (!hasActive && !volunteerErrorReason) volunteerErrorReason = 'Volunteer Disabled';
                 }
               }
             }
@@ -369,11 +369,11 @@ class AuthController {
 
       // Handle authorization failures — redirect with error code
       if (isUserInactive && !selectedUser) {
-        return res.redirect(`${frontendUrl}/google-signin?error=${encodeURIComponent('account_inactive')}`);
+        return res.redirect(`${frontendUrl}/google-signin?error=${encodeURIComponent('Account Inactive')}`);
       }
 
       if (isSaasDisabled && !isFestivalAuthorized) {
-        return res.redirect(`${frontendUrl}/google-signin?error=${encodeURIComponent('saas_disabled')}`);
+        return res.redirect(`${frontendUrl}/google-signin?error=${encodeURIComponent('SAAS Disabled')}`);
       }
 
       if (!isFestivalAuthorized && volunteerErrorReason && !selectedUser) {
@@ -381,7 +381,7 @@ class AuthController {
       }
 
       if (!isFestivalAuthorized || !selectedUser) {
-        return res.redirect(`${frontendUrl}/google-signin?error=${encodeURIComponent('no_festival_access')}`);
+        return res.redirect(`${frontendUrl}/google-signin?error=${encodeURIComponent('No Festival Access')}`);
       }
 
       // 4. Check ownership & build roles
@@ -417,7 +417,7 @@ class AuthController {
         });
 
         if (loginFestivals.length === 0) {
-          return res.redirect(`${frontendUrl}/google-signin?error=${encodeURIComponent('volunteer_disabled')}`);
+          return res.redirect(`${frontendUrl}/google-signin?error=${encodeURIComponent('Volunteer Disabled')}`);
         }
       }
 
@@ -450,7 +450,7 @@ class AuthController {
     } catch (error) {
       console.error('googleCallback error:', error.message);
       const frontendUrl = (process.env.FESTEASE_FRONTEND_URL || 'https://festease.autovertest.com').replace(/\/$/, '');
-      return res.redirect(`${frontendUrl}/google-signin?error=${encodeURIComponent('server_error')}`);
+      return res.redirect(`${frontendUrl}/google-signin?error=${encodeURIComponent('Something went wrong.')}`);
     }
   }
   /**

@@ -42,6 +42,18 @@ class SystemController {
       });
     }
   }
+
+  /**
+   * GET /api/v1/system/config
+   */
+  static async getConfig(req, res) {
+    const backendUrl = (process.env.FESTEASE_BACKEND_URL || 'https://apifestease.autovertest.com').replace(/\/$/, '');
+    res.json({
+      success: true,
+      backendUrl,
+      apiBaseUrl: `${backendUrl}/api/v1`
+    });
+  }
 }
 
 module.exports = SystemController;

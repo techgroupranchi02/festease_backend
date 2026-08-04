@@ -6,6 +6,7 @@ const VolunteerController = require('../controllers/volunteerController');
 const RegistrationController = require('../controllers/registrationController');
 const CheckinController = require('../controllers/checkinController');
 const QrController = require('../controllers/qrController');
+const VenueController = require('../controllers/venueController');
 const { authenticateJwt } = require('../middlewares/authMiddleware');
 const authorizeRole = require('../middlewares/authorizeRole');
 
@@ -25,19 +26,18 @@ router.post('/login', AuthController.login);
 router.get('/auth/google/redirect', AuthController.googleRedirect);
 router.get('/auth/google/callback', AuthController.googleCallback);
 
+// Public System Routes
+router.get('/system/config', SystemController.getConfig);
+router.get('/system/health', SystemController.getHealth);
+router.get('/system/tables', SystemController.getTables);
+router.get('/health', SystemController.getHealth);
+
 const authRouter = express.Router();
 authRouter.use(authenticateJwt);
 authRouter.get('/my-profile', AuthController.getMe); 
 authRouter.post('/logout', AuthController.logout); 
 authRouter.post('/saas-to-freecomers', AuthController.generateFreecomersToken);
 router.use('/', authRouter);
-
-/* ==========================================================================
-   System Routes
-   ========================================================================== */
-router.get('/system/health', SystemController.getHealth);
-router.get('/system/tables', SystemController.getTables);
-router.get('/health', SystemController.getHealth);
 
 /* ==========================================================================
    Festival: Dashboard  [owner only — admin role]
@@ -69,6 +69,19 @@ volunteerRouter.post('/', VolunteerController.assignVolunteer);
 router.use('/festivals/:festival_id/volunteers', volunteerRouter);
 
 /* ==========================================================================
+   Festival: Venues  [owner only — admin role]
+   ========================================================================== */
+const venueRouter = express.Router({ mergeParams: true });
+venueRouter.use(authenticateJwt, authorizeRole(['admin']));
+venueRouter.post('/', VenueController.addUpdateVenues);
+venueRouter.put('/:venue_id', VenueController.addUpdateVenues);
+venueRouter.delete('/:venue_id', VenueController.deleteVenue);
+venueRouter.get('/', VenueController.getVenues);
+venueRouter.get('/:venue_id', VenueController.getVenue);
+router.use('/festivals/:festival_id/venues', venueRouter);
+router.use('/festivals/:festival_id/venue', venueRouter);
+
+/* ==========================================================================
    Festival: Registrations / Attendees  [registration role]
    ========================================================================== */
 const regRouter = express.Router({ mergeParams: true });
@@ -83,6 +96,16 @@ regRouter.get('/qr-prelist', QrController.getPreListQrData);
 regRouter.get('/:registration_id', CheckinController.getRegistration); 
 regRouter.get('/', CheckinController.getRegistration); 
 router.use('/festivals/:festival_id/registrations', regRouter);
+
+/* ==========================================================================
+   Festival: UnRegistrations / Attendees  [registration role]
+   ========================================================================== */
+const unregisteredRegRouter = express.Router({ mergeParams: true });
+unregisteredRegRouter.use(authenticateJwt, authorizeRole(['registration']));
+unregisteredRegRouter.post('/', RegistrationController.bulkUnregisteredRegister);
+unregisteredRegRouter.get('/', RegistrationController.bulkGetUnregistered);
+router.use('/festivals/:festival_id/un-registered', unregisteredRegRouter);
+
 
 /* ==========================================================================
    Festival: Check-in  [checkin role]

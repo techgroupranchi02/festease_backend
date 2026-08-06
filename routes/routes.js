@@ -7,6 +7,7 @@ const RegistrationController = require('../controllers/registrationController');
 const CheckinController = require('../controllers/checkinController');
 const QrController = require('../controllers/qrController');
 const VenueController = require('../controllers/venueController');
+const DriveController = require('../controllers/driveController');
 const { authenticateJwt } = require('../middlewares/authMiddleware');
 const authorizeRole = require('../middlewares/authorizeRole');
 
@@ -19,6 +20,16 @@ router.get('/download/qr/:qr_id', QrController.generatePreListQrImage);
 router.get('/download/all/pre-qr-images', QrController.generateAllPreListQrImage);
 router.post('/decrypt-qr', QrController.decryptQr);
 
+/* ==========================================================================
+   Google Drive Image Proxy  [public — no auth required]
+   GET /drive/images            → list all images in the configured Drive folder
+   GET /drive/images/:file_id   → stream / proxy a single image
+   ========================================================================== */
+// const driveRouter = express.Router();
+// driveRouter.use(authenticateJwt);
+// driveRouter.get('/drive/images',          DriveController.listImages);
+// driveRouter.get('/drive/images/:file_id', DriveController.proxyImage);
+// router.use('/festivals/:festival_id', driveRouter);
 
 router.post('/generate-saas-token', AuthController.generateSaasToken);
 router.post('/login', AuthController.login);
@@ -49,6 +60,9 @@ dashRouter.get('/checkedins-users', DashboardController.getCheckedInList);
 dashRouter.get('/checkedins-filter-list', DashboardController.getCheckedInFilterList);
 dashRouter.get('/registrations-users', DashboardController.getRegistrationsList);
 dashRouter.get('/registrations-filter-list', DashboardController.getRegistrationsFilterList);
+// dashRouter.get('/:festival_id/drive/images', DriveController.listImages);
+// dashRouter.get('/:festival_id/drive/images/:file_id', DriveController.proxyImage);
+dashRouter.get('/qr-attendees', DashboardController.getQrWithAttendees);
 router.use('/festivals/:festival_id/dashboard', dashRouter);
 
 /* ==========================================================================

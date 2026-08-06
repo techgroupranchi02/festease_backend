@@ -73,7 +73,7 @@ const rules = {
   /** Value must be a boolean */
   boolean: () => (value, field) => {
     if (value !== undefined && value !== null && value !== '') {
-      if (typeof value !== 'boolean') {
+      if (typeof value !== 'boolean' && !['true', 'false', '1', '0', 1, 0].includes(value)) {
         return `The ${field} field must be a boolean.`;
       }
     }

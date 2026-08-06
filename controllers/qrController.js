@@ -5,6 +5,7 @@ const SaasQr              = require('../models/SaasQr');
 const QRCode              = require('qrcode');
 const JSZip               = require('jszip');
 const { encryptQrPayload, decryptQrPayload } = require('../utils/paseto');
+const { generateQrWithCenterLogo } = require('../utils/qrLogoHelper');
 
 class QrController {
   /**
@@ -42,13 +43,8 @@ class QrController {
         festival_id: reg.festival_id,
       });
 
-      // Encode the PASETO token string into the QR image
-      const qrBuffer = await QRCode.toBuffer(pasetoToken, {
-        type:   'png',
-        width:  300,
-        margin: 2,
-        color:  { dark: '#000000', light: '#FFFFFF' },
-      });
+      // Encode the PASETO token string into the QR image with center festival logo
+      const qrBuffer = await generateQrWithCenterLogo(pasetoToken, reg.festival_id, { width: 300 });
 
       res.setHeader('Content-Type', 'image/png');
       res.setHeader('Content-Disposition', `inline; filename="qr-${id}.png"`);
@@ -176,12 +172,7 @@ class QrController {
         festival_id: festivalId,
       });
 
-      const qrBuffer = await QRCode.toBuffer(pasetoToken, {
-        type: 'png',
-        width: 300,
-        margin: 2,
-        color: { dark: '#000000', light: '#FFFFFF' },
-      });
+      const qrBuffer = await generateQrWithCenterLogo(pasetoToken, festivalId, { width: 300 });
 
       res.setHeader('Content-Type', 'image/png');
       res.setHeader('Content-Disposition', `inline; filename="qr-${qrItem.qr_data}.png"`);
@@ -227,12 +218,7 @@ class QrController {
           attendee_id: row.attendee_id,
         });
 
-        const pngBuffer = await QRCode.toBuffer(pasetoToken, {
-          type:   'png',
-          width:  300,
-          margin: 2,
-          color:  { dark: '#000000', light: '#FFFFFF' },
-        });
+        const pngBuffer = await generateQrWithCenterLogo(pasetoToken, row.festival_id || null, { width: 300 });
 
         folder.file(`${row.qr_data}.png`, pngBuffer);
       }

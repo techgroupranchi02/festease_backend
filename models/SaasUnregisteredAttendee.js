@@ -85,6 +85,7 @@ class SaasUnregisteredAttendee {
       SELECT 
         u.saas_unregistered_attendee_id,
         sa.attendee_id,
+        COALESCE(sa.event_id, u.event_id) AS event_id,
         COALESCE(sa.name, u.name) AS name,
         COALESCE(sa.email, u.email) AS email,
         COALESCE(sa.phone, u.phone_number) AS phone_number,
@@ -119,6 +120,7 @@ class SaasUnregisteredAttendee {
       SELECT 
         NULL AS saas_unregistered_attendee_id,
         sa.attendee_id,
+        sa.event_id,
         sa.name,
         sa.email,
         sa.phone AS phone_number,
@@ -191,8 +193,10 @@ class SaasUnregisteredAttendee {
     const selectSql = `SELECT * FROM (${baseSql}) AS merged${whereClause} ORDER BY created_at DESC${limitClause}`;
     const [rows] = await query(selectSql, queryParams);
 
-    const formattedRows = rows.map(r => ({
+    const pageOffset = (limit === 'all' || parsedLimit <= 0) ? 0 : (parsedPage - 1) * parsedLimit;
+    const formattedRows = rows.map((r, index) => ({
       ...r,
+      id: pageOffset + index + 1,
       is_registered: Boolean(r.is_registered)
     }));
 

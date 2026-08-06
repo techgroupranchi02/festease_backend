@@ -72,7 +72,7 @@ async function revokeToken(token, exp) {
   const tokenHash = hashToken(token);
   const expiresAtMs = exp
     ? exp * 1000
-    : Date.now() + 24 * 60 * 60 * 1000;
+    : Date.now() + 7 * 24 * 60 * 60 * 1000;
 
   // Add to memory immediately
   revokedTokens.set(tokenHash, expiresAtMs);

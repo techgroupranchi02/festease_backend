@@ -58,7 +58,11 @@ class AuthController {
         film_festival_id: filmFestivalId
       };
 
-      const token = generateToken(tokenPayload, '24h');
+      const rememberMeVal = req.body?.remember_me ?? req.body?.rememberMe ?? req.query?.remember_me ?? req.query?.rememberMe;
+      const isRememberMe = rememberMeVal === true || rememberMeVal === 'true' || rememberMeVal === 1 || rememberMeVal === '1';
+      const expiresIn = isRememberMe ? '30d' : '7d';
+
+      const token = generateToken(tokenPayload, expiresIn);
       return res.json({
         success: true,
         message: 'Token generated successfully',
@@ -166,8 +170,16 @@ class AuthController {
       return res.status(400).json({ success: false, message: 'accountType must be "individual" or "organization".' });
     }
 
-    // Encode accountType in state so the callback can retrieve it
-    const state = accountType ? Buffer.from(JSON.stringify({ accountType: accountType.trim().toLowerCase() })).toString('base64') : '';
+    console.log("remember me ----> ", req.query);
+
+    const rememberMe = req.query.remember_me || req.query.rememberMe;
+
+    const stateData = {};
+    if (accountType) stateData.accountType = accountType.trim().toLowerCase();
+    if (rememberMe !== undefined && rememberMe !== null) stateData.rememberMe = rememberMe;
+
+    // Encode accountType and rememberMe in state so the callback can retrieve them
+    const state = Object.keys(stateData).length > 0 ? Buffer.from(JSON.stringify(stateData)).toString('base64') : '';
 
     const params = new URLSearchParams({
       client_id: clientId,
@@ -188,7 +200,7 @@ class AuthController {
    * On success, redirects to the frontend login page with ?google-token=JWT
    */
   static async googleCallback(req, res) {
-    const frontendUrl = (process.env.FESTEASE_FRONTEND_URL || 'https://festease.autovertest.com').replace(/\/$/, '');
+    const frontendUrl = (process.env.FESTEASE_FRONTEND_URL || 'https://festease.freecomers.com').replace(/\/$/, '');
 
     try {
       const { code, error: oauthError, state } = req.query;
@@ -197,13 +209,15 @@ class AuthController {
         return res.redirect(`${frontendUrl}/google-signin?error=${encodeURIComponent(oauthError || 'Access Denied')}`);
       }
 
-      // Decode accountType from state param (set by googleRedirect)
+      // Decode accountType & rememberMe from state param (set by googleRedirect)
       let accountType = null;
+      let rememberMeFromState = null;
       if (state) {
         try {
           const decoded = JSON.parse(Buffer.from(state, 'base64').toString('utf8'));
           const rawAccountType = decoded.accountType || decoded.account_type;
           if (rawAccountType) accountType = rawAccountType.trim().toLowerCase();
+          rememberMeFromState = decoded.rememberMe ?? decoded.remember_me ?? null;
         } catch {
           // Ignore malformed state
         }
@@ -429,7 +443,11 @@ class AuthController {
         email: selectedUser.email,
         account_type: selectedUser.account_type,
       };
-      const jwtToken = generateToken(tokenPayload, '24h');
+      const rememberMeVal = rememberMeFromState ?? req.query?.remember_me ?? req.query?.rememberMe ?? req.body?.remember_me ?? req.body?.rememberMe;
+      const isRememberMe = rememberMeVal === true || rememberMeVal === 'true' || rememberMeVal === 1 || rememberMeVal === '1';
+      const expiresIn = isRememberMe ? '30d' : '7d';
+
+      const jwtToken = generateToken(tokenPayload, expiresIn);
 
       // Pass a compact payload so the frontend can read user + festivals without an extra API call
       // const userData = {
@@ -449,7 +467,7 @@ class AuthController {
 
     } catch (error) {
       console.error('googleCallback error:', error.message);
-      const frontendUrl = (process.env.FESTEASE_FRONTEND_URL || 'https://festease.autovertest.com').replace(/\/$/, '');
+      const frontendUrl = (process.env.FESTEASE_FRONTEND_URL || 'https://festease.freecomers.com').replace(/\/$/, '');
       return res.redirect(`${frontendUrl}/google-signin?error=${encodeURIComponent('Something went wrong.')}`);
     }
   }
@@ -466,6 +484,7 @@ class AuthController {
         email: [rules.required(), rules.email(), rules.maxLength(255)],
         password: [rules.required(), rules.string(), rules.maxLength(128)],
         accountType: [rules.required(), rules.string(), rules.inList(['individual', 'organization'])],
+        remember_me: [rules.boolean()],
       };
       const result = validate({ ...req.body, accountType }, validationRules);
       if (!result.valid) return sendValidationError(res, result.errors);
@@ -777,7 +796,11 @@ class AuthController {
         account_type: selectedUser.account_type,
       };
 
-      const token = generateToken(tokenPayload, '24h');
+      const rememberMeVal = req.body?.remember_me ?? req.body?.rememberMe ?? req.query?.remember_me ?? req.query?.rememberMe;
+      const isRememberMe = rememberMeVal === true || rememberMeVal === 'true' || rememberMeVal === 1 || rememberMeVal === '1';
+      const expiresIn = isRememberMe ? '30d' : '7d';
+
+      const token = generateToken(tokenPayload, expiresIn);
 
       return res.json({
         success: true,

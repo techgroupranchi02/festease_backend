@@ -7,6 +7,7 @@ const { query } = require('../config/db');
  * festival_id must be present in req.params.festival_id.
  *
  * Rules:
+ *  - Checks that is_saas is enabled for the festival in the events table.
  *  - Strict owners (event creators / festival creators) → allowed on ALL routes including ['admin'].
  *  - Organisers (film_festivals_organisers) → allowed on volunteer-role routes only, NOT ['admin'].
  *  - Volunteers → must have at least one of requiredRoles in their
@@ -31,9 +32,17 @@ function authorizeRole(requiredRoles) {
         return res.status(400).json({ success: false, message: 'Festival ID is required.' });
       }
 
-      // ── 1. Check strict ownership (event creator or festival creator only) ──
-      //    These users get full admin access to this festival.
-      const [[eventOwnerRows], [festivalOwnerRows]] = await Promise.all([
+      // ── 1. Check is_saas status & strict ownership ──
+      const [[saasRows], [eventOwnerRows], [festivalOwnerRows]] = await Promise.all([
+        query(
+          `SELECT e.is_saas
+           FROM film_festivals ff
+           JOIN events e ON ff.event_id = e.event_id
+           WHERE ff.film_festival_id = ?
+             AND (e.is_deleted = 0 OR e.is_deleted IS NULL)
+           LIMIT 1`,
+          [festivalId]
+        ),
         query(
           `SELECT 1 FROM events e
            JOIN film_festivals ff ON ff.event_id = e.event_id
@@ -49,6 +58,18 @@ function authorizeRole(requiredRoles) {
           [userId, festivalId]
         ),
       ]);
+
+      if (saasRows.length === 0) {
+        return res.status(404).json({ success: false, message: 'Festival not found.' });
+      }
+
+      const isSaas = Number(saasRows[0].is_saas) === 1 || saasRows[0].is_saas === true;
+      if (!isSaas) {
+        return res.status(403).json({
+          success: false,
+          message: 'Access restricted: SaaS is disabled for this festival.'
+        });
+      }
 
       const isStrictOwner = eventOwnerRows.length > 0 || festivalOwnerRows.length > 0;
 

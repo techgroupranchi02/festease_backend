@@ -11,6 +11,7 @@ const fs = require('fs');
 const { validate, rules, sendValidationError } = require('../middlewares/validate');
 const { query } = require('../config/db');
 const { encryptQrPayload } = require('../utils/paseto');
+const { generateQrWithCenterLogo } = require('../utils/qrLogoHelper');
 const { sendTicketEmail } = require('../utils/mailer');
 
 const XLSX = require('xlsx');
@@ -411,7 +412,7 @@ class RegistrationController {
 
       const page = parseInt(req.query.page) || 1;
       const limit = req.query.limit || req.query.per_page || 10;
-      const search = req.query.search || '';
+      const search = req.query.search || req.query.Search ||'';
       const delegateCategory = req.query.delegate_category || req.query.delegateCategory || '';
       const registrationStatus = req.query.registration_status || req.query.status || req.query.is_registered || '';
 
@@ -424,9 +425,32 @@ class RegistrationController {
         registrationStatus,
       });
 
+      const pageOffset = (result.page - 1) * (result.perPage || 10);
+      const dataWithId = await Promise.all(result.data.map(async (item, index) => {
+        let qrToken = null;
+        if (item.status === 'registered' && item.attendee_id) {
+          try {
+            qrToken = await encryptQrPayload({
+              attendee_id: item.attendee_id,
+              event_id:    item.event_id,
+              festival_id: festivalId,
+              iat:         Math.floor(Date.now() / 1000),
+            });
+          } catch (pasetoErr) {
+            console.error('Failed to generate PASETO token in bulkGetUnregistered:', pasetoErr.message);
+          }
+        }
+
+        return {
+          ...item,
+          id: pageOffset + index + 1,
+          qr_token: qrToken,
+        };
+      }));
+
       return res.status(200).json({
         success: true,
-        data: result.data,
+        data: dataWithId,
         total: result.total,
         page: result.page,
         per_page: result.perPage,
@@ -475,8 +499,8 @@ class RegistrationController {
         iat:         Math.floor(Date.now() / 1000),
       });
 
-      // Generate QR code from PASETO token
-      const qrBuffer = await QRCode.toBuffer(pasetoToken, { width: 250, margin: 1 });
+      // Generate QR code image with center festival logo (error correction level H)
+      const qrBuffer = await generateQrWithCenterLogo(pasetoToken, reg.festival_id);
       const qrBase64 = qrBuffer.toString('base64');
       const qrDataUrl = `data:image/png;base64,${qrBase64}`;
 
@@ -606,8 +630,8 @@ class RegistrationController {
         });
       }
 
-      // Generate QR code image from resolved content
-      const qrBuffer = await QRCode.toBuffer(qrContent, { width: 250, margin: 1 });
+      // Generate QR code image with center festival logo (error correction level H)
+      const qrBuffer = await generateQrWithCenterLogo(qrContent, reg.festival_id);
       const qrBase64 = qrBuffer.toString('base64');
       const qrDataUrl = `data:image/png;base64,${qrBase64}`;
 

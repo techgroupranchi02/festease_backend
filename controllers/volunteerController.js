@@ -2,6 +2,8 @@ const fs = require('fs');
 const path = require('path');
 const { query } = require('../config/db');
 const { validate, rules, sendValidationError } = require('../middlewares/validate');
+const User = require('../models/User');
+const { sendVolunteerAssignmentEmail } = require('../utils/mailer');
 
 class VolunteerController {
   /**
@@ -324,10 +326,15 @@ class VolunteerController {
         [parseInt(user_id), festivalId, eventId]
       );
 
-      let isUpdate = false;
+      const isUpdate = existing.length > 0;
+      const isTrueActive = is_active === true || is_active === 'true' || is_active === 1 || is_active === '1';
 
-      if (existing.length > 0) {
-        isUpdate = true;
+      if (!isUpdate && !isTrueActive) {
+        dbErrors.is_active = ['Volunteer must be active to be assigned.'];
+        return sendValidationError(res, dbErrors);
+      }
+
+      if (isUpdate) {
         await query(
           'UPDATE saas_volunteers SET roles = ?, event_id = ?, expiry_date = ?, is_active = ?, updated_at = NOW() WHERE volunteer_id = ?',
           [rolesJson, eventId, mysqlDate, isActiveValue, existing[0].volunteer_id]
@@ -337,6 +344,55 @@ class VolunteerController {
           'INSERT INTO saas_volunteers (user_id, festival_id, event_id, roles, expiry_date, is_active, status, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, \'active\', NOW(), NOW())',
           [parseInt(user_id), festivalId, eventId, rolesJson, mysqlDate, isActiveValue]
         );
+      }
+
+      // Send email notification ONLY on first-time volunteer assignment (not on update)
+      if (!isUpdate) {
+        // Fetch festival details (name, logo, banner) for the email
+        const authPrefix = (process.env.non_auth_image_url_prefix || process.env.auth_image_url_prefix || 'https://api.autovertest.com/api/v1/non-auth-user/retrieve-media').replace(/\/+$/, '');
+        const [festRowsForEmail] = await query(
+          'SELECT e.name AS event_name, ff.film_festival_logo_image_name, ff.film_festival_banner_image_name FROM film_festivals ff JOIN events e ON ff.event_id = e.event_id WHERE ff.film_festival_id = ? LIMIT 1',
+          [festivalId]
+        );
+        const festivalName = festRowsForEmail.length > 0 ? festRowsForEmail[0].event_name : 'BISFF';
+        const festivalLogoUrl = festRowsForEmail.length > 0 && festRowsForEmail[0].film_festival_logo_image_name
+          ? `${authPrefix}/images/film-festivals/${festRowsForEmail[0].film_festival_logo_image_name}`
+          : null;
+        const festivalBannerUrl = festRowsForEmail.length > 0 && festRowsForEmail[0].film_festival_banner_image_name
+          ? `${authPrefix}/images/film-festivals/${festRowsForEmail[0].film_festival_banner_image_name}`
+          : null;
+
+        // Fetch user profile details to send notification email
+        const userObj = await User.getProfile(parseInt(user_id));
+        if (userObj && userObj.email) {
+          const volunteerName = userObj.profile?.name || userObj.profile?.full_name || 'Volunteer';
+          const frontendUrl = (process.env.FESTEASE_FRONTEND_URL || 'https://festease.freecomers.com').replace(/\/$/, '');
+          const loginLink = `${frontendUrl}/login`;
+
+          // Determine desk name based on assigned roles
+          let deskName = 'Registration Desk';
+          const parsedRoles = Array.isArray(roles) ? roles : [];
+          if (parsedRoles.includes('registration') && parsedRoles.includes('checkin')) {
+            deskName = 'Registration & Check-in Desk';
+          } else if (parsedRoles.includes('checkin')) {
+            deskName = 'Check-in Desk';
+          } else if (parsedRoles.includes('registration')) {
+            deskName = 'Registration Desk';
+          }
+
+          // Asynchronously send email notification
+          sendVolunteerAssignmentEmail({
+            to: userObj.email,
+            volunteerName,
+            festivalName,
+            loginLink,
+            deskName,
+            festivalLogoUrl,
+            festivalBannerUrl,
+          }).catch(err => {
+            console.error(`Failed to send volunteer assignment email to ${userObj.email}:`, err.message);
+          });
+        }
       }
 
       return res.json({

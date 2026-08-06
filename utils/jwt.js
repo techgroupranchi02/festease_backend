@@ -55,7 +55,7 @@ const { privateKey, publicKey } = getJwtKeys();
 /**
  * Asynchronously / RSA Sign JWT (RS256)
  */
-function generateToken(payload, expiresIn = '24h') {
+function generateToken(payload, expiresIn = '7d') {
   return jwt.sign(payload, privateKey, {
     algorithm: 'RS256',
     expiresIn

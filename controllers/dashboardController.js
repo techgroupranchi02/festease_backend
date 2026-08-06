@@ -1,6 +1,8 @@
 const SaasAttendee = require('../models/SaasAttendee');
-const SaasCheckin = require('../models/SaasCheckin');
-const { query } = require('../config/db');
+const SaasCheckin  = require('../models/SaasCheckin');
+const { query }    = require('../config/db');
+const { listImages, getDriveFileMap } = require('../utils/googleDrive');
+const { encryptQrPayload } = require('../utils/paseto');
 
 /** Escape a single CSV cell value */
 function csvCell(v) {
@@ -316,6 +318,155 @@ class DashboardController {
       return res.status(500).json({ success: false, message: 'Failed to fetch filter list.' });
     }
   }
+
+
+  /**
+   * GET /api/v1/festivals/:festival_id/dashboard/qr-attendees
+   *
+   * Fetches data from saas_qr table joined with saas_attendees.
+   * Fields returned: qr_id, qr_data, file_url, attendee_id.
+   * If attendee_id is present, also returns:
+   *   name, email, phone, delegate_category, registration_type, status.
+   */
+  static async getQrWithAttendees(req, res) {
+    try {
+      const festivalId = parseInt(req.params.festival_id);
+      if (!festivalId) {
+        return res.status(400).json({ success: false, message: 'festival_id is required.' });
+      }
+
+      const page         = parseInt(req.query.page) || 1;
+      const perPage      = req.query.per_page === 'all' || req.query.perPage === 'all' ? null : (parseInt(req.query.per_page || req.query.perPage) || 20);
+      const search       = req.query.search || req.query.q || '';
+      const sort = req.query.sort || req.query.sort_by || req.query.status || req.query.assignedStatus || 'oldest';
+
+      const conditions = ['(q.festival_id = ? OR q.festival_id IS NULL OR a.festival_id = ?)'];
+      const params = [festivalId, festivalId];
+
+      if (search) {
+        conditions.push(`(
+          q.qr_data LIKE ? OR
+          CAST(q.qr_id AS CHAR) LIKE ? OR
+          a.name LIKE ? OR
+          a.email LIKE ? OR
+          a.phone LIKE ?
+        )`);
+        const like = `%${search}%`;
+        params.push(like, like, like, like, like);
+      }
+
+      let orderByClause = 'ORDER BY q.qr_id ASC';
+      if (sort === 'assigned' || sort === 'used' || sort === 'assigned_first') {
+        orderByClause = 'ORDER BY CASE WHEN q.attendee_id IS NOT NULL THEN 0 ELSE 1 END, q.qr_id ASC';
+      } else if (sort === 'unassigned' || sort === 'unused' || sort === 'unassigned_first') {
+        orderByClause = 'ORDER BY CASE WHEN q.attendee_id IS NULL THEN 0 ELSE 1 END, q.qr_id ASC';
+      } else if (sort === 'recent') {
+        orderByClause = 'ORDER BY q.qr_id DESC';
+      } else if (sort === 'name_asc') {
+        orderByClause = 'ORDER BY CASE WHEN a.name IS NOT NULL THEN 0 ELSE 1 END, a.name ASC, q.qr_id ASC';
+      } else if (sort === 'name_des') {
+        orderByClause = 'ORDER BY CASE WHEN a.name IS NOT NULL THEN 0 ELSE 1 END, a.name DESC, q.qr_id ASC';
+      }
+
+      const whereClause = `WHERE ${conditions.join(' AND ')}`;
+
+      let limitClause = '';
+      const queryParams = [...params];
+      if (perPage !== null && perPage > 0) {
+        const offset = (page - 1) * perPage;
+        limitClause = ' LIMIT ? OFFSET ?';
+        queryParams.push(perPage, offset);
+      }
+
+      const [rows] = await query(
+        `SELECT
+           q.qr_id,
+           q.qr_data,
+           q.attendee_id,
+           a.name,
+           a.email,
+           a.phone,
+           a.delegate_category,
+           a.registration_type,
+           a.status
+         FROM saas_qr q
+         LEFT JOIN saas_attendees a ON q.attendee_id = a.attendee_id
+         ${whereClause}
+         ${orderByClause}
+         ${limitClause}`,
+        queryParams
+      );
+
+      const [[{ total }]] = await query(
+        `SELECT COUNT(*) AS total
+         FROM saas_qr q
+         LEFT JOIN saas_attendees a ON q.attendee_id = a.attendee_id
+         ${whereClause}`,
+        params
+      );
+
+      // ── Resolve Drive proxy URLs ──────────────────────────────────────────
+      // const FOLDER_ID = process.env.GOOGLE_DRIVE_FOLDER_ID;
+      // const baseUrl   = (process.env.FESTEASE_BACKEND_URL || '').replace(/\/+$/, '');
+
+      // let driveFileMap = new Map(); // key: qr_data (e.g. "BISFF2026-10001"), value: Drive file id
+
+      // if (FOLDER_ID && rows.length > 0) {
+      //   try {
+      //     driveFileMap = await getDriveFileMap(FOLDER_ID);
+      //   } catch (driveErr) {
+      //     console.error('getQrWithAttendees: Drive listing failed:', driveErr.message);
+      //   }
+      // }
+
+      const data = await Promise.all(
+        rows.map(async (row) => {
+          // const driveId     = driveFileMap.get(row.qr_data);
+          // const file_url    = driveId ? `${baseUrl}/api/v1/festivals/${festivalId}/drive/images/${driveId}` : null;
+          const hasAttendee = row.attendee_id !== null && row.attendee_id !== undefined;
+
+          let qr_token = null;
+          try {
+            qr_token = await encryptQrPayload({
+              qr_data:     row.qr_data,
+            });
+          } catch (pasetoErr) {
+            console.error('getQrWithAttendees: PASETO token generation failed:', pasetoErr.message);
+          }
+
+          return {
+            qr_id:             row.qr_id,
+            qr_data:           row.qr_data,
+            qr_token:          qr_token,
+            // file_url:          file_url?? null,
+            attendee_id:       hasAttendee ? row.attendee_id : null,
+            name:              hasAttendee ? row.name : null,
+            email:             hasAttendee ? row.email : null,
+            phone:             hasAttendee ? row.phone : null,
+            delegate_category: hasAttendee ? row.delegate_category : null,
+            registration_type: hasAttendee ? row.registration_type : null,
+            status:            hasAttendee ? row.status : null,
+          };
+        })
+      );
+
+      return res.json({
+        success:       true,
+        message:       'qr attendees fetched successfully',
+        data,
+        total_records: total,
+        current_page:  page,
+        per_page:      perPage,
+        last_page:     perPage ? Math.ceil(total / perPage) : 1,
+        total_pages:   perPage ? Math.ceil(total / perPage) : 1,
+      });
+    } catch (err) {
+      console.error('getQrWithAttendees error:', err.message);
+      return res.status(500).json({ success: false, message: 'Failed to fetch qr attendees.' });
+    }
+  }
+
+
 }
 
 module.exports = DashboardController;

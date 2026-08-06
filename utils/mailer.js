@@ -5,11 +5,13 @@ const fs = require('fs');
 const path = require('path');
 
 // Load SMTP settings from .env
-const smtpHost = process.env.SMTP_HOST || '';
-const smtpPort = parseInt(process.env.SMTP_PORT) || 587;
+const smtpHost = process.env.SMTP_HOST || process.env.MAIL_HOST || '';
+const smtpPort = parseInt(process.env.SMTP_PORT || process.env.MAIL_PORT) || 587;
 const smtpUser = process.env.SMTP_USER || process.env.MAIL_USERNAME || '';
 const smtpPass = process.env.SMTP_PASS || process.env.MAIL_PASSWORD || '';
-const smtpFrom = process.env.SMTP_FROM || (smtpUser ? `"FestEase Support" <${smtpUser}>` : '"FestEase Support" <support@festease.com>');
+const mailFromAddr = process.env.MAIL_FROM_ADDRESS || '';
+const mailFromName = process.env.MAIL_FROM_NAME || 'FestEase Support';
+const smtpFrom = process.env.SMTP_FROM || (mailFromAddr ? `"${mailFromName}" <${mailFromAddr}>` : (smtpUser && smtpUser.includes('@') ? `"${mailFromName}" <${smtpUser}>` : `"${mailFromName}" <info@freecomers.com>`));
 
 let transporter = null;
 
@@ -106,7 +108,7 @@ async function sendVolunteerAssignmentEmail({ to, volunteerName, festivalName, l
 
   let festivalBannerHtml = '';
 
-if (festivalBannerUrl) {
+  if (festivalBannerUrl) {
     festivalBannerHtml = `
       <tr>
         <td align="center" style="padding: 20px 24px 0 24px;">
@@ -191,12 +193,12 @@ if (festivalBannerUrl) {
   }
 
   htmlBody = htmlBody
-    .replace(/\{\{\s*logo_url\s*\}\}/g,              logoUrl || defaultLogo)
-    .replace(/\{\{\s*festival_banner_html\s*\}\}/g,  festivalBannerHtml)
-    .replace(/\{\{\s*volunteer_name\s*\}\}/g,        volunteerName || 'Volunteer')
-    .replace(/\{\{\s*festival_name\s*\}\}/g,         festivalName || 'BISFF')
-    .replace(/\{\{\s*login_link\s*\}\}/g,            loginLink)
-    .replace(/\{\{\s*desk_name\s*\}\}/g,             deskName || 'Registration Desk');
+    .replace(/\{\{\s*logo_url\s*\}\}/g, logoUrl || defaultLogo)
+    .replace(/\{\{\s*festival_banner_html\s*\}\}/g, festivalBannerHtml)
+    .replace(/\{\{\s*volunteer_name\s*\}\}/g, volunteerName || 'Volunteer')
+    .replace(/\{\{\s*festival_name\s*\}\}/g, festivalName || 'BISFF')
+    .replace(/\{\{\s*login_link\s*\}\}/g, loginLink)
+    .replace(/\{\{\s*desk_name\s*\}\}/g, deskName || 'Registration Desk');
 
   const subject = `Welcome as Volunteer for ${festivalName || 'BISFF'}`;
 

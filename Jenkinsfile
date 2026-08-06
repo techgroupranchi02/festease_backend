@@ -48,12 +48,13 @@ pipeline {
                         // Ensure directory exists on target server
                         sh "ssh -o StrictHostKeyChecking=no ${targetServer} 'mkdir -p ${targetPath}'"
 
-                        // Sync codebase, excluding node_modules, .env, and logs
+                        // Sync codebase, excluding node_modules, .env, logs, and keys
                         sh """
                             rsync -avz --delete \
                                 --exclude='node_modules' \
                                 --exclude='.env' \
                                 --exclude='logs' \
+                                --exclude='keys' \
                                 --exclude='.git' \
                                 -e 'ssh -o StrictHostKeyChecking=no' ./ ${targetServer}:${targetPath}/
                         """

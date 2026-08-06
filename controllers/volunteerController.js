@@ -367,7 +367,7 @@ class VolunteerController {
         if (userObj && userObj.email) {
           const volunteerName = userObj.profile?.name || userObj.profile?.full_name || 'Volunteer';
           const frontendUrl = (process.env.FESTEASE_FRONTEND_URL || 'https://festease.freecomers.com').replace(/\/$/, '');
-          const loginLink = `${frontendUrl}/login`;
+          const loginLink = `${frontendUrl}`;
 
           // Determine desk name based on assigned roles
           let deskName = 'Registration Desk';
@@ -397,10 +397,10 @@ class VolunteerController {
 
       return res.json({
         success: true,
-        message: isUpdate ? 'Volunteer updated successfully.' : 'Volunteer assigned successfully.',
+        message: isUpdate ? 'Volunteer ' + (isTrueActive ? 'activated' : 'deactivated') + ' successfully.' : 'Volunteer assigned successfully.',
         data: {
           user_id,
-          success: true
+          is_active: isTrueActive
         }
       });
 

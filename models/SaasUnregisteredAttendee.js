@@ -164,9 +164,18 @@ class SaasUnregisteredAttendee {
       }
     }
 
-    if (search && String(search).trim()) {
+    let cleanSearch = (search !== null && search !== undefined) ? String(search).trim() : '';
+    if (cleanSearch.includes('%')) {
+      try {
+        cleanSearch = decodeURIComponent(cleanSearch).trim();
+      } catch (e) {
+        // Keep cleanSearch as is if decoding fails
+      }
+    }
+
+    if (cleanSearch) {
       conditions.push('(name LIKE ? OR email LIKE ? OR phone_number LIKE ? OR delegate_category LIKE ? OR qr_token LIKE ? OR registration_type LIKE ?)');
-      const likeStr = `%${String(search).trim()}%`;
+      const likeStr = `%${cleanSearch}%`;
       params.push(likeStr, likeStr, likeStr, likeStr, likeStr, likeStr);
     }
 

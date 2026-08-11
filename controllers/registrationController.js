@@ -192,7 +192,7 @@ class RegistrationController {
           delegate_category: [
             rules.required(),
             rules.string(),
-            rules.inList(['Student', 'Senior Citizen', 'Filmmaker', 'Film Fraternity', 'Guest', 'General Delegate', 'Discovery Market', 'Echoes Film Club'])
+            rules.inList(['Student / Senior Citizen', 'Filmmaker', 'Film Fraternity', 'Guest', 'General Delegate', 'Discovery Market', 'Echoes Film Club'])
           ],
           registration_type: [
             rules.required(),
@@ -412,9 +412,31 @@ class RegistrationController {
 
       const page = parseInt(req.query.page) || 1;
       const limit = req.query.limit || req.query.per_page || 10;
-      const search = req.query.search || req.query.Search ||'';
-      const delegateCategory = req.query.delegate_category || req.query.delegateCategory || '';
-      const registrationStatus = req.query.registration_status || req.query.status || req.query.is_registered || '';
+      let search = req.query.search || req.query.Search || '';
+      let delegateCategory = req.query.delegate_category || req.query.delegateCategory || '';
+      let registrationStatus = req.query.registration_status || req.query.status || req.query.is_registered || '';
+
+      if (typeof search === 'string' && search.includes('%')) {
+        try {
+          search = decodeURIComponent(search);
+        } catch (e) {
+          // ignore decode error if malformed % sequence
+        }
+      }
+      if (typeof delegateCategory === 'string' && delegateCategory.includes('%')) {
+        try {
+          delegateCategory = decodeURIComponent(delegateCategory);
+        } catch (e) {
+          // ignore decode error if malformed % sequence
+        }
+      }
+      if (typeof registrationStatus === 'string' && registrationStatus.includes('%')) {
+        try {
+          registrationStatus = decodeURIComponent(registrationStatus);
+        } catch (e) {
+          // ignore decode error if malformed % sequence
+        }
+      }
 
       const result = await SaasUnregisteredAttendee.findWithPagination({
         festivalId,

@@ -14,32 +14,55 @@ class SaasQr {
   /**
    * Helper to mask email addresses (e.g., techgroupranchi01@gmail.com -> te******01@gmail.com)
    */
-  static maskEmail(email) {
-    if (!email || typeof email !== 'string') return null;
-    const parts = email.trim().split('@');
-    if (parts.length !== 2) return email;
-    const [user, domain] = parts;
-    if (user.length <= 2) {
-      return `${user[0] || '*'}*@${domain}`;
-    }
-    const front = user.slice(0, 2);
-    const back = user.slice(-2);
-    const masked = '*'.repeat(Math.max(user.length - 4, 3));
-    return `${front}${masked}${back}@${domain}`;
-  }
+static maskEmail(email) {
+    if (typeof email !== 'string') return null;
 
-  /**
-   * Helper to mask phone numbers (e.g., 1299658799 -> 12******99)
-   */
-  static maskPhone(phone) {
-    if (!phone || typeof phone !== 'string') return null;
-    const clean = phone.trim();
-    if (clean.length <= 4) return '*'.repeat(clean.length);
-    const front = clean.slice(0, 2);
-    const back = clean.slice(-2);
-    const masked = '*'.repeat(clean.length - 4);
+    const value = email.trim();
+    const atIndex = value.lastIndexOf('@');
+
+    if (atIndex <= 0 || atIndex === value.length - 1) {
+        return '***@***';
+    }
+
+    const username = value.slice(0, atIndex);
+    const domain = value.slice(atIndex + 1);
+
+    if (username.length <= 2) {
+        return `${username[0] || '*'}**@${domain}`;
+    }
+
+    const front = username.slice(0, 2);
+    const back = username.slice(-2);
+
+    // Intentionally use a different number of * than actual hidden characters
+    const hiddenCharacters = username.length - 4;
+    const masked = '*'.repeat(Math.max(hiddenCharacters + 1, 3));
+
+    return `${front}${masked}${back}@${domain}`;
+}
+
+static maskPhone(phone) {
+    if (phone === null || phone === undefined) return null;
+
+    const value = String(phone).trim();
+
+    // Keep only digits
+    const digits = value.replace(/\D/g, '');
+
+    if (!digits) return null;
+
+    // For very short numbers, don't reveal anything
+    if (digits.length <= 4) {
+        return '*'.repeat(digits.length);
+    }
+
+    // Expose only first 2 and last 2 digits
+    const front = digits.slice(0, 2);
+    const back = digits.slice(-2);
+    const masked = '*'.repeat(digits.length - 4);
+
     return `${front}${masked}${back}`;
-  }
+}
   /**
    * Create a new QR code entry.
    *

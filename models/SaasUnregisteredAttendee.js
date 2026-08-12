@@ -85,6 +85,7 @@ class SaasUnregisteredAttendee {
       SELECT 
         u.saas_unregistered_attendee_id,
         sa.attendee_id,
+        sa.qr_id,
         COALESCE(sa.event_id, u.event_id) AS event_id,
         COALESCE(sa.name, u.name) AS name,
         COALESCE(sa.email, u.email) AS email,
@@ -120,6 +121,7 @@ class SaasUnregisteredAttendee {
       SELECT 
         NULL AS saas_unregistered_attendee_id,
         sa.attendee_id,
+        sa.qr_id,
         sa.event_id,
         sa.name,
         sa.email,

@@ -192,7 +192,7 @@ class RegistrationController {
           delegate_category: [
             rules.required(),
             rules.string(),
-            rules.inList(['Student / Senior Citizen', 'Filmmaker', 'Film Fraternity', 'Guest', 'General Delegate', 'Discovery Film', 'Echoes School'])
+            rules.inList(['Student / Senior Citizen', 'Student', 'Cinephile', 'Senior Citizen', 'Filmmaker', 'Film Fraternity', 'Guest', 'General Delegate', 'Discovery Film', 'Echoes School'])
           ],
           registration_type: [
             rules.required(),
@@ -449,15 +449,29 @@ class RegistrationController {
 
       const pageOffset = (result.page - 1) * (result.perPage || 10);
       const dataWithId = await Promise.all(result.data.map(async (item, index) => {
-        let qrToken = null;
-        if (item.status === 'registered' && item.attendee_id) {
+        let qrToken = item.qr_token || null;
+        const qrId = item.qr_id || null;
+        if (item.status === 'registered' && item.attendee_id && !qrToken) {
           try {
-            qrToken = await encryptQrPayload({
-              attendee_id: item.attendee_id,
-              event_id:    item.event_id,
-              festival_id: festivalId,
-              iat:         Math.floor(Date.now() / 1000),
-            });
+            if (qrId) {
+              const qrRecord = await SaasQr.findById(qrId);
+              const qrData = qrRecord ? qrRecord.qr_data : `BISFF2026-${qrId}`;
+              qrToken = await encryptQrPayload({
+                qr_id:       qrId,
+                qr_data:     qrData,
+                attendee_id: item.attendee_id,
+                event_id:    item.event_id,
+                festival_id: festivalId,
+                iat:         Math.floor(Date.now() / 1000),
+              });
+            } else {
+              qrToken = await encryptQrPayload({
+                attendee_id: item.attendee_id,
+                event_id:    item.event_id,
+                festival_id: festivalId,
+                iat:         Math.floor(Date.now() / 1000),
+              });
+            }
           } catch (pasetoErr) {
             console.error('Failed to generate PASETO token in bulkGetUnregistered:', pasetoErr.message);
           }
@@ -465,6 +479,7 @@ class RegistrationController {
 
         return {
           ...item,
+          qr_id: qrId,
           id: pageOffset + index + 1,
           qr_token: qrToken,
         };

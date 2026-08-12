@@ -8,6 +8,31 @@ const { validate, rules, sendValidationError } = require('../middlewares/validat
 const { decryptQrPayload }                = require('../utils/paseto');
 const { query }                           = require('../config/db');
 
+/**
+ * Format a date object or date string to "12 Aug 2026, 11:18 AM" format.
+ * @param {Date|string} dateInput
+ * @returns {string}
+ */
+function formatCheckinTime(dateInput) {
+  if (!dateInput) return '';
+  const d = new Date(dateInput);
+  if (isNaN(d.getTime())) return String(dateInput);
+
+  const day = d.getDate();
+  const months = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
+  const month = months[d.getMonth()];
+  const year = d.getFullYear();
+
+  let hours = d.getHours();
+  const minutes = d.getMinutes().toString().padStart(2, '0');
+  const ampm = hours >= 12 ? 'PM' : 'AM';
+  hours = hours % 12;
+  hours = hours ? hours : 12;
+  const timeStr = `${hours}:${minutes} ${ampm}`;
+
+  return `${day} ${month} ${year}, ${timeStr}`;
+}
+
 class CheckinController {
   /**
    * GET /api/v1/festivals/:festival_id/registrations/:registration_id?
@@ -107,25 +132,21 @@ class CheckinController {
    * Mark a registered attendee as checked in.
    *
    * Body: { qr_token, checkin_venue_id?, remarks? }
-   *
-   * `qr_token` is the PASETO v4.local token embedded in the attendee's QR code.
-   *
-   * Two token shapes are supported:
-   *   1. Pre-listed QR token: { qr_id, qr_data, attendee_id, event_id, festival_id, iat }
-   *      → The qr_data (e.g. "BISFF2026-10001") is used to look up the
-   *        attendee via the saas_qr table (qr_data → attendee_id).
-   *   2. Legacy attendee token: { attendee_id, event_id, festival_id, iat }
-   *      → attendee_id is used directly for the DB lookup.
    */
   static async checkIn(req, res) {
     try {
       const festivalId         = parseInt(req.params.festival_id);
       const checkedInByUserId  = req.user.user_id;
-      const { qr_token, checkin_venue_id, remarks } = req.body || {};
+      const { qr_token, checkin_venue_id, delegate_category, remarks } = req.body || {};
 
       // --- Input validation ---
       const result = validate(req.body, {
         qr_token: [rules.required(), rules.string()],
+        delegate_category: [
+            rules.required(),
+            rules.string(),
+            rules.inList(['Student / Senior Citizen', 'Student', 'Cinephile', 'Senior Citizen', 'Filmmaker', 'Film Fraternity', 'Guest', 'General Delegate', 'Discovery Film', 'Echoes School'])
+          ],
       });
       if (!result.valid) return sendValidationError(res, result.errors);
 
@@ -134,7 +155,6 @@ class CheckinController {
       try {
         payload = await decryptQrPayload(qr_token);
       } catch {
-        // Do not reveal token internals in the error message
         return res.status(400).json({ success: false, message: 'Invalid or expired QR code.' });
       }
 
@@ -144,11 +164,8 @@ class CheckinController {
       }
 
       // --- Load attendee ---
-      // If the token contains qr_data (pre-listed QR flow), find the attendee
-      // via the saas_qr table.  Otherwise fall back to the attendee_id in the token.
       let reg;
       if (payload.qr_data) {
-        // Pre-listed QR: look up the saas_qr row by qr_data
         const qrRecord = await SaasQr.findByQrData(payload.qr_data);
         if (!qrRecord) {
           return res.status(404).json({ success: false, message: `QR code "${payload.qr_data}" not found.` });
@@ -158,14 +175,12 @@ class CheckinController {
         }
         reg = await SaasAttendee.findById(parseInt(qrRecord.attendee_id));
       } else {
-        // Legacy token: attendee_id embedded directly
         reg = await SaasAttendee.findById(parseInt(payload.attendee_id));
       }
       if (!reg) {
         return res.status(404).json({ success: false, message: 'Registration not found.' });
       }
 
-      // Belt-and-suspenders: ensure DB record matches token festival
       if (reg.festival_id !== festivalId) {
         return res.status(403).json({ success: false, message: 'Registration does not belong to your festival.' });
       }
@@ -173,19 +188,29 @@ class CheckinController {
         return res.status(409).json({ success: false, message: 'Attendee registration has been cancelled.' });
       }
 
-      // --- Check if already checked in ---
-      const existing = await SaasCheckin.findByAttendeeId(reg.id);
+      // --- Check if already checked in at this venue ---
+      const venueId = checkin_venue_id ? parseInt(checkin_venue_id) : null;
+      const existing = await SaasCheckin.findByAttendeeAndVenue(reg.id, venueId);
       if (existing) {
+        const venues = await FestivalVenue.findByFestivalId(festivalId);
+        const matchedVenue = venues.find(v => Number(v.venue_id) === Number(existing.checkin_venue_id || venueId));
+        const venueName = matchedVenue ? matchedVenue.venue_name : (existing.checkin_venue_id ? `Venue #${existing.checkin_venue_id}` : 'this venue');
+        const formattedTime = formatCheckinTime(existing.check_in_at || existing.created_at);
+
         return res.status(409).json({
           success: false,
-          message: 'Attendee is already checked in.',
-          data: { checkin_id: existing.checkin_id, check_in_at: existing.check_in_at, checkin_venue_id: existing.checkin_venue_id },
+          message: `Attendee already checked in at ${formattedTime} at ${venueName}.`,
+          data: {
+            checkin_id: existing.checkin_id,
+            check_in_at: existing.check_in_at,
+            checkin_venue_id: existing.checkin_venue_id,
+            venue_name: venueName,
+            formatted_check_in_at: formattedTime
+          },
         });
       }
 
-      // --- Determine role from JWT ---
       // --- Determine role ---
-      // If the logged-in user is the festival owner, record role as 'admin', otherwise 'volunteer'
       const [festivalRows] = await query(
         'SELECT user_id FROM film_festivals WHERE film_festival_id = ? AND (is_deleted = 0 OR is_deleted IS NULL) LIMIT 1',
         [festivalId]
@@ -199,11 +224,15 @@ class CheckinController {
         eventId:                 reg.event_id,
         festivalId,
         checkinVenueId:          checkin_venue_id ? parseInt(checkin_venue_id) : null,
+        delegateCategory:        delegate_category.trim(),
         checkedInByUserId,
         checkedInByRole,
         checkedInByVolunteerId:  checkedInByRole === 'volunteer' ? checkedInByUserId : null,
         remarks:                 remarks || null,
       });
+
+      // --- Override delegate_category in saas_attendees table to latest check-in ---
+      await SaasAttendee.updateDelegateCategory(reg.id, delegate_category.trim());
 
       return res.json({
         success: true,
@@ -213,6 +242,7 @@ class CheckinController {
           registration_id:  reg.id,
           name:             reg.name,
           email:            reg.email,
+          delegate_category: delegate_category.trim(),
           checkin_venue_id: checkin_venue_id || null,
         },
       });
@@ -221,11 +251,6 @@ class CheckinController {
       return res.status(500).json({ success: false, message: 'Failed to process check-in.' });
     }
   }
-
-
-
-
-
 
   static async scanQrCode(req, res) {
     try {
@@ -236,6 +261,10 @@ class CheckinController {
         return res.status(400).json({ success: false, message: 'QR token is required.' });
       }
 
+      // Fetch venues for the festival to construct venue array and status evaluation
+      const venues = await FestivalVenue.findByFestivalId(festivalId);
+      const venueNamesArray = venues.map(v => v.venue_name);
+
       // Helper to return error response with specific entry_status and message
       const returnError = (entryStatus, message) => {
         return res.status(400).json({
@@ -245,7 +274,7 @@ class CheckinController {
             name: null,
             category: null,
             registration_type: null,
-            venue: null,
+            venue: [],
             email: null,
             phone: null,
             entry_status: entryStatus,
@@ -269,8 +298,6 @@ class CheckinController {
       }
 
       // --- Load attendee ---
-      // If the token contains qr_data (pre-listed QR flow), find the attendee
-      // via the saas_qr table.  Otherwise fall back to the attendee_id in the token.
       let reg;
       if (payload.qr_data) {
         const qrRecord = await SaasQr.findByQrData(payload.qr_data);
@@ -293,50 +320,91 @@ class CheckinController {
         return returnError('Different Festival QR', 'QR code belongs to a different festival.');
       }
 
-      // Check check-in status
-      const existing = await SaasCheckin.findByAttendeeId(reg.id);
+      // Get all check-ins for this attendee
+      const allCheckins = await SaasCheckin.findAllByAttendeeId(reg.id);
+      const festivalCheckins = allCheckins.filter(c => Number(c.festival_id) === Number(festivalId));
 
-      // Fetch venues for the festival to resolve names
-      const venues = await FestivalVenue.findByFestivalId(festivalId);
+      const checkedInVenueIds = new Set(
+        festivalCheckins
+          .map(c => c.checkin_venue_id !== null ? Number(c.checkin_venue_id) : null)
+          .filter(id => id !== null && !isNaN(id))
+      );
 
-      let venueName = null;
-      if (existing && existing.checkin_venue_id) {
-        const matchedVenue = venues.find(v => v.venue_id === existing.checkin_venue_id);
-        if (matchedVenue) {
-          venueName = matchedVenue.venue_name;
+      // Filter venues to ONLY show already checked in venues
+      const checkedInVenueNames = venues
+        .filter(v => checkedInVenueIds.has(Number(v.venue_id)))
+        .map(v => v.venue_name);
+
+      // Calculate entry_status:
+      // "Checked In" only when checked in at ALL venues listed in festival venues.
+      // If checked in at some (or 0) venues but not all venues, return "Not Checked In".
+      let entryStatus = 'Not Checked In';
+      if (reg.status === 'cancelled') {
+        entryStatus = 'Cancelled';
+      } else if (venues.length > 0) {
+        const festivalVenueIds = venues.map(v => Number(v.venue_id));
+        const checkedInAllVenues = festivalVenueIds.every(id => checkedInVenueIds.has(id));
+        if (checkedInAllVenues) {
+          entryStatus = 'Checked In';
         }
       } else {
-        const checkin_venue_id = req.query.checkin_venue_id ? parseInt(req.query.checkin_venue_id) : null;
-        let resolvedVenueId = checkin_venue_id;
-        if (!resolvedVenueId && venues.length === 1) {
-          resolvedVenueId = venues[0].venue_id;
-        }
-        if (resolvedVenueId) {
-          const matchedVenue = venues.find(v => v.venue_id === resolvedVenueId);
-          if (matchedVenue) {
-            venueName = matchedVenue.venue_name;
-          }
+        // If festival has no registered venues, consider checked in if there is at least 1 check-in
+        if (festivalCheckins.length > 0) {
+          entryStatus = 'Checked In';
         }
       }
 
-      const checkinTime = existing ? (existing.check_in_at || existing.created_at || null) : null;
+      // Determine venue-specific check-in time
+      const checkin_venue_id = req.query.checkin_venue_id ? parseInt(req.query.checkin_venue_id) : null;
+      let targetVenueId = checkin_venue_id;
+      if (!targetVenueId && venues.length === 1) {
+        targetVenueId = venues[0].venue_id;
+      }
+
+      let checkinTime = null;
+      if (targetVenueId) {
+        const venueCheckin = festivalCheckins.find(c => Number(c.checkin_venue_id) === Number(targetVenueId));
+        checkinTime = venueCheckin ? (venueCheckin.check_in_at || venueCheckin.created_at || null) : null;
+      } else {
+        const latestCheckin = festivalCheckins.length > 0 ? festivalCheckins[0] : null;
+        checkinTime = latestCheckin ? (latestCheckin.check_in_at || latestCheckin.created_at || null) : null;
+      }
+
+      // Detailed check-in info per venue
+      const venueCheckins = venues
+        .filter(v => checkedInVenueIds.has(Number(v.venue_id)))
+        .map(v => {
+          const fc = festivalCheckins.find(c => Number(c.checkin_venue_id) === Number(v.venue_id));
+          return {
+            venue_id: v.venue_id,
+            venue_name: v.venue_name,
+            category: fc && fc.delegate_category ? fc.delegate_category : (reg.delegate_category || null),
+            checkin_time: fc ? (fc.check_in_at || fc.created_at || null) : null
+          };
+        });
+
       const registrationTime = reg.registered_at || reg.created_at || null;
-      // const displayTime = existing ? checkinTime : registrationTime;
+
+      // Delegate category from saas_checkins table (or fallback to registration category)
+      const checkinWithCategory = festivalCheckins.find(c => c.delegate_category);
+      const categoryFromCheckin = checkinWithCategory
+        ? checkinWithCategory.delegate_category
+        : (reg.delegate_category || null);
 
       return res.status(200).json({
         success: true,
         message: 'QR scan processed successfully.',
         data: {
           name: reg.name,
-          category: reg.delegate_category || null,
+          category: categoryFromCheckin,
           registration_type: reg.registration_type || null,
-          venue: venueName,
+          // venue: checkedInVenueNames,
+          venue_checkins: venueCheckins,
           email: SaasQr.maskEmail(reg.email),
           phone: SaasQr.maskPhone(reg.phone),
-          entry_status: existing ? 'Checked In' : (reg.status === 'cancelled' ? 'Cancelled' : 'Not Checked In'),
-          // date_time: displayTime,
+          entry_status: entryStatus,
           registration_time: registrationTime,
-          checkin_time: checkinTime
+          // checkin_time: checkinTime
         }
       });
     } catch (err) {
@@ -344,23 +412,6 @@ class CheckinController {
       return res.status(500).json({ success: false, message: 'Failed to process QR scan.' });
     }
   }
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
 }
 
 module.exports = CheckinController;

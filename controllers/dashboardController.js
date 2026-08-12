@@ -30,6 +30,27 @@ function buildCsv(rows, cols) {
   return `${header}\n${body}`;
 }
 
+/** Format date to "DD-MM-YYYY hh:mm:ss A" for CSV export */
+function formatCsvCheckinTime(dateInput) {
+  if (!dateInput) return '';
+  const d = new Date(dateInput);
+  if (isNaN(d.getTime())) return String(dateInput);
+
+  const day = d.getDate().toString().padStart(2, '0');
+  const month = (d.getMonth() + 1).toString().padStart(2, '0');
+  const year = d.getFullYear();
+
+  let hours = d.getHours();
+  const minutes = d.getMinutes().toString().padStart(2, '0');
+  const seconds = d.getSeconds().toString().padStart(2, '0');
+  const ampm = hours >= 12 ? 'PM' : 'AM';
+  hours = hours % 12;
+  hours = hours ? hours : 12;
+  const timeStr = `${hours.toString().padStart(2, '0')}:${minutes}:${seconds} ${ampm}`;
+
+  return `${day}-${month}-${year} ${timeStr}`;
+}
+
 class DashboardController {
   /**
    * GET /api/v1/festivals/:festival_id/dashboard
@@ -116,21 +137,9 @@ class DashboardController {
         )
       ]);
 
-      // ── CSV download ───────────────────────────────────────────────────────
-      if (isCsvDownload) {
-        const cols = [
-          { label: 'Reg ID',  key: ['attendee_id', 'id'] },
-          { label: 'Name',    key: ['attendee_name', 'name'] },
-          { label: 'Email',   key: ['attendee_email', 'email'] },
-          { label: 'Phone',   key: ['attendee_phone', 'phone'] },
-          { label: 'Status',  key: 'status' },
-        ];
-        const csv = buildCsv(result.data, cols);
-        res.setHeader('Content-Type', 'text/csv');
-        res.setHeader('Content-Disposition', `attachment; filename="checkedin_festival_${festivalId}.csv"`);
-        return res.send(csv);
-      }
-      // ──────────────────────────────────────────────────────────────────────
+      const FestivalVenue = require('../models/FestivalVenue');
+      const festivalVenues = await FestivalVenue.findByFestivalId(festivalId);
+      const venueMap = new Map(festivalVenues.map(v => [Number(v.venue_id), v.venue_name]));
 
       const authPrefix = (process.env.non_auth_image_url_prefix || process.env.auth_image_url_prefix || 'https://api.autovertest.com/api/v1/non-auth-user/retrieve-media').replace(/\/+$/, '');
       const eventDetails = festRows.length > 0 ? {
@@ -139,11 +148,80 @@ class DashboardController {
         banner: festRows[0].film_festival_banner_image_name ? `${authPrefix}/images/film-festivals/${festRows[0].film_festival_banner_image_name}` : null
       } : { event_name: null, logo: null, banner: null };
 
-      const mappedData = result.data.map(row => ({
-        ...row,
-        checked_in_by_profile_pic: row.checked_in_by_image ? `${authPrefix}/images/users/${row.checked_in_by_image}` : null,
-        checked_in_by_thumbnail_pic: row.checked_in_by_image ? `${authPrefix}/images/users/thumb_${row.checked_in_by_image}` : null
+      const mappedData = await Promise.all(result.data.map(async row => {
+        const attendeeCheckins = await SaasCheckin.findAllByAttendeeId(row.attendee_id);
+        const festivalCheckins = attendeeCheckins.filter(c => Number(c.festival_id) === Number(festivalId));
+
+        const venueCheckins = festivalCheckins
+          .filter(c => c.checkin_venue_id !== null && c.checkin_venue_id !== undefined)
+          .map(c => {
+            const vId = Number(c.checkin_venue_id);
+            const vName = venueMap.get(vId) || `Venue #${vId}`;
+            return {
+              venue_id: vId,
+              venue_name: vName,
+              checkin_time: c.check_in_at || c.created_at || null
+            };
+          });
+
+        const { check_in_at, ...cleanedRow } = row;
+
+        return {
+          ...cleanedRow,
+          venue_checkins: venueCheckins,
+          checked_in_by_profile_pic: row.checked_in_by_image ? `${authPrefix}/images/users/${row.checked_in_by_image}` : null,
+          checked_in_by_thumbnail_pic: row.checked_in_by_image ? `${authPrefix}/images/users/thumb_${row.checked_in_by_image}` : null
+        };
       }));
+
+      // ── CSV download ───────────────────────────────────────────────────────
+      if (isCsvDownload) {
+        const csvRows = [];
+        let slNo = 1;
+        for (const item of mappedData) {
+          if (Array.isArray(item.venue_checkins) && item.venue_checkins.length > 0) {
+            for (const vc of item.venue_checkins) {
+              csvRows.push({
+                sl_no: slNo++,
+                attendee_id: item.attendee_id,
+                attendee_name: item.attendee_name || item.name || '',
+                attendee_email: item.attendee_email || item.email || '',
+                attendee_phone: item.attendee_phone || item.phone || '',
+                venue_name: vc.venue_name || '',
+                checked_in_at: formatCsvCheckinTime(vc.checkin_time),
+                status: item.status || 'checked_in'
+              });
+            }
+          } else {
+            csvRows.push({
+              sl_no: slNo++,
+              attendee_id: item.attendee_id,
+              attendee_name: item.attendee_name || item.name || '',
+              attendee_email: item.attendee_email || item.email || '',
+              attendee_phone: item.attendee_phone || item.phone || '',
+              venue_name: '',
+              checked_in_at: '',
+              status: item.status || 'checked_in'
+            });
+          }
+        }
+
+        const cols = [
+          { label: 'Sl. No.',      key: 'sl_no' },
+          { label: 'Reg ID',       key: 'attendee_id' },
+          { label: 'Name',         key: 'attendee_name' },
+          { label: 'Email',        key: 'attendee_email' },
+          { label: 'Phone',        key: 'attendee_phone' },
+          { label: 'Venue',        key: 'venue_name' },
+          { label: 'checked-in at', key: 'checked_in_at' },
+          { label: 'Status',       key: 'status' },
+        ];
+        const csv = buildCsv(csvRows, cols);
+        res.setHeader('Content-Type', 'text/csv');
+        res.setHeader('Content-Disposition', `attachment; filename="checkedin_festival_${festivalId}.csv"`);
+        return res.send(csv);
+      }
+      // ──────────────────────────────────────────────────────────────────────
 
       return res.json({
         success: true,

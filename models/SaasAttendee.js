@@ -172,7 +172,9 @@ class SaasAttendee {
        LEFT JOIN users u   ON sa.registered_by_user_id = u.id
        LEFT JOIN individuals i ON u.id = i.user_id
        LEFT JOIN organizations o ON u.id = o.user_id
-       LEFT JOIN saas_checkins ci ON sa.attendee_id = ci.attendee_id
+       LEFT JOIN saas_checkins ci ON ci.checkin_id = (
+         SELECT checkin_id FROM saas_checkins WHERE attendee_id = sa.attendee_id ORDER BY check_in_at DESC, checkin_id DESC LIMIT 1
+       )
        WHERE sa.attendee_id = ? LIMIT 1`,
       [id]
     );
@@ -284,7 +286,9 @@ class SaasAttendee {
        LEFT JOIN users u ON sa.registered_by_user_id = u.id
        LEFT JOIN individuals i ON u.id = i.user_id
        LEFT JOIN organizations o ON u.id = o.user_id
-       LEFT JOIN saas_checkins ci ON sa.attendee_id = ci.attendee_id
+       LEFT JOIN saas_checkins ci ON ci.checkin_id = (
+         SELECT checkin_id FROM saas_checkins WHERE attendee_id = sa.attendee_id ORDER BY check_in_at DESC, checkin_id DESC LIMIT 1
+       )
        WHERE ${where}
        ORDER BY ${orderBy}${limitClause}`,
       queryParams
@@ -515,6 +519,19 @@ class SaasAttendee {
       [attendeeId]
     );
     return result.affectedRows > 0;
+  }
+
+  /**
+   * Update delegate_category for an attendee.
+   *
+   * @param {number} attendeeId
+   * @param {string} delegateCategory
+   */
+  static async updateDelegateCategory(attendeeId, delegateCategory) {
+    await query(
+      `UPDATE saas_attendees SET delegate_category = ? WHERE attendee_id = ?`,
+      [delegateCategory, attendeeId]
+    );
   }
 }
 

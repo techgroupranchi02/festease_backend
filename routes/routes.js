@@ -114,12 +114,17 @@ router.use('/festivals/:festival_id/registrations', regRouter);
 /* ==========================================================================
    Festival: UnRegistrations / Attendees  [registration role]
    ========================================================================== */
-const unregisteredRegRouter = express.Router({ mergeParams: true });
-unregisteredRegRouter.use(authenticateJwt, authorizeRole(['registration']));
-unregisteredRegRouter.post('/', RegistrationController.bulkUnregisteredRegister);
-unregisteredRegRouter.get('/', RegistrationController.bulkGetUnregistered);
-router.use('/festivals/:festival_id/un-registered', unregisteredRegRouter);
+// const unregisteredRegRouter = express.Router({ mergeParams: true });
+// unregisteredRegRouter.use(authenticateJwt, authorizeRole(['registration']));
+// unregisteredRegRouter.post('/', RegistrationController.bulkUnregisteredRegister);
+// unregisteredRegRouter.get('/', RegistrationController.bulkGetUnregistered);
+// router.use('/festivals/:festival_id/un-registered', unregisteredRegRouter);
 
+const unregisteredRegRouter = express.Router({ mergeParams: true });
+unregisteredRegRouter.use(authenticateJwt);
+unregisteredRegRouter.post('/',authorizeRole(['admin']),RegistrationController.bulkUnregisteredRegister);
+unregisteredRegRouter.get('/',authorizeRole(['registration']),RegistrationController.bulkGetUnregistered);
+router.use('/festivals/:festival_id/un-registered', unregisteredRegRouter);
 
 /* ==========================================================================
    Festival: Check-in  [checkin role]

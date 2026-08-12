@@ -29,6 +29,7 @@ class SaasCheckin {
     eventId,
     festivalId,
     checkinVenueId = null,
+    delegateCategory = null,
     checkedInByUserId,
     checkedInByRole,
     checkedInByVolunteerId = null,
@@ -36,11 +37,11 @@ class SaasCheckin {
   }) {
     const [result] = await query(
       `INSERT INTO saas_checkins
-         (attendee_id, event_id, festival_id, checkin_venue_id,
+         (attendee_id, event_id, festival_id, checkin_venue_id, delegate_category,
           checked_in_by_user_id, checked_in_by_role, checked_in_by_volunteer_id,
           check_in_at, status, remarks)
-       VALUES (?, ?, ?, ?, ?, ?, ?, NOW(), 'checked_in', ?)`,
-      [attendeeId, eventId, festivalId, checkinVenueId || null,
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, NOW(), 'checked_in', ?)`,
+      [attendeeId, eventId, festivalId, checkinVenueId || null, delegateCategory || null,
        checkedInByUserId, checkedInByRole, checkedInByVolunteerId || null,
        remarks || null]
     );
@@ -48,17 +49,54 @@ class SaasCheckin {
   }
 
   /**
-   * Find a check-in record by attendee_id.
+   * Find the most recent check-in record by attendee_id.
    *
    * @param {number} attendeeId
    * @returns {object|null}
    */
   static async findByAttendeeId(attendeeId) {
     const [rows] = await query(
-      `SELECT * FROM saas_checkins WHERE attendee_id = ? LIMIT 1`,
+      `SELECT * FROM saas_checkins WHERE attendee_id = ? ORDER BY check_in_at DESC, checkin_id DESC LIMIT 1`,
       [attendeeId]
     );
     return rows.length > 0 ? rows[0] : null;
+  }
+
+  /**
+   * Find a check-in record by attendee_id and checkin_venue_id.
+   *
+   * @param {number} attendeeId
+   * @param {number|null} checkinVenueId
+   * @returns {object|null}
+   */
+  static async findByAttendeeAndVenue(attendeeId, checkinVenueId) {
+    if (checkinVenueId !== null && checkinVenueId !== undefined) {
+      const [rows] = await query(
+        `SELECT * FROM saas_checkins WHERE attendee_id = ? AND checkin_venue_id = ? LIMIT 1`,
+        [attendeeId, checkinVenueId]
+      );
+      return rows.length > 0 ? rows[0] : null;
+    } else {
+      const [rows] = await query(
+        `SELECT * FROM saas_checkins WHERE attendee_id = ? AND checkin_venue_id IS NULL LIMIT 1`,
+        [attendeeId]
+      );
+      return rows.length > 0 ? rows[0] : null;
+    }
+  }
+
+  /**
+   * Find all check-in records for an attendee.
+   *
+   * @param {number} attendeeId
+   * @returns {Array}
+   */
+  static async findAllByAttendeeId(attendeeId) {
+    const [rows] = await query(
+      `SELECT * FROM saas_checkins WHERE attendee_id = ? ORDER BY check_in_at DESC`,
+      [attendeeId]
+    );
+    return rows;
   }
 
   /**
@@ -126,9 +164,9 @@ class SaasCheckin {
 
     const where = conditions.join(' AND ');
 
-    let orderBy = 'ci.check_in_at DESC';
+    let orderBy = 'MAX(ci.check_in_at) DESC';
     if (sortBy === 'oldest') {
-      orderBy = 'ci.check_in_at ASC';
+      orderBy = 'MIN(ci.check_in_at) ASC';
     } else if (sortBy === 'name_asc') {
       orderBy = 'sa.name ASC';
     } else if (sortBy === 'name_des') {
@@ -147,25 +185,32 @@ class SaasCheckin {
 
     const [rows] = await query(
       `SELECT
-         ci.*,
+         ci.attendee_id,
+         MAX(ci.checkin_id) AS checkin_id,
+         MAX(ci.event_id) AS event_id,
+         MAX(ci.festival_id) AS festival_id,
+         MAX(ci.check_in_at) AS check_in_at,
+         MAX(ci.status) AS status,
+         MAX(ci.remarks) AS remarks,
          sa.name  AS attendee_name,
          sa.email AS attendee_email,
          sa.phone AS attendee_phone,
          sa.registered_by_role,
-         CASE WHEN i.name IS NOT NULL THEN i.name ELSE o.name END AS checked_in_by_name,
-         i.image_name AS checked_in_by_image
+         MAX(CASE WHEN i.name IS NOT NULL THEN i.name ELSE o.name END) AS checked_in_by_name,
+         MAX(i.image_name) AS checked_in_by_image
        FROM saas_checkins ci
        JOIN saas_attendees sa ON ci.attendee_id = sa.attendee_id
        LEFT JOIN users u ON ci.checked_in_by_user_id = u.id
        LEFT JOIN individuals i ON u.id = i.user_id
        LEFT JOIN organizations o ON u.id = o.user_id
        WHERE ${where}
+       GROUP BY ci.attendee_id, sa.name, sa.email, sa.phone, sa.registered_by_role
        ORDER BY ${orderBy}${limitClause}`,
       queryParams
     );
 
     const [[{ total }]] = await query(
-      `SELECT COUNT(*) AS total
+      `SELECT COUNT(DISTINCT ci.attendee_id) AS total
        FROM saas_checkins ci
        JOIN saas_attendees sa ON ci.attendee_id = sa.attendee_id
        WHERE ${where}`,

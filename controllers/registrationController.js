@@ -801,6 +801,256 @@ class RegistrationController {
     }
   }
 
+  /**
+   * POST /api/v1/public/festivals/:festival_id/registrations
+   * Public endpoint to insert attendees into saas_attendees table from CSV/Excel file.
+   * Requires: file, delegate_category
+   * Optional: qr_id_from, qr_id_to
+   * Email sending is disabled for public registrations.
+   */
+  static publicRegister(req, res) {
+    upload.any()(req, res, async (err) => {
+      if (err) {
+        return res.status(400).json({
+          success: false,
+          message: 'Validation error',
+          errors: { file: err.message }
+        });
+      }
+
+      try {
+        const reqBody  = req.body || {};
+        const reqQuery = req.query || {};
+
+        const rawFestivalId = req.params.festival_id || reqBody.festival_id || reqQuery.festival_id;
+        const festivalId    = parseInt(rawFestivalId);
+
+        const validationErrors = {};
+
+        if (!festivalId || isNaN(festivalId)) {
+          validationErrors.festival_id = 'required';
+        }
+
+        // Check for uploaded file across any field name (file, csv, excel, upload, etc.)
+        const uploadedFile = req.file || (req.files && req.files.length > 0 ? req.files[0] : null);
+        if (!uploadedFile) {
+          validationErrors.file = 'required';
+        }
+
+        // ── Extract delegate_category ────────────────────────────────────
+        const fallbackCategory = (reqBody.delegate_category || reqBody.deligate_category || reqQuery.delegate_category || reqQuery.deligate_category)
+          ? String(reqBody.delegate_category || reqBody.deligate_category || reqQuery.delegate_category || reqQuery.deligate_category).trim()
+          : null;
+
+        if (!fallbackCategory) {
+          validationErrors.delegate_category = 'required';
+        }
+
+        // ── Extract optional QR ID Range ───────────────────────────────
+        const rawQrFrom = reqBody.qr_id_from || reqBody.qr_from || reqQuery.qr_id_from || reqQuery.qr_from;
+        const rawQrTo   = reqBody.qr_id_to   || reqBody.qr_to   || reqQuery.qr_id_to   || reqQuery.qr_to;
+
+        const qrIdFrom = rawQrFrom ? parseInt(rawQrFrom) : null;
+        const qrIdTo   = rawQrTo   ? parseInt(rawQrTo)   : null;
+
+        if (qrIdFrom !== null && !isNaN(qrIdFrom)) {
+          const fromId = qrIdFrom;
+          const toId   = (qrIdTo !== null && !isNaN(qrIdTo)) ? qrIdTo : fromId;
+          if (toId < fromId) {
+            validationErrors.qr_id_to = 'must be greater than or equal to qr_id_from';
+          }
+        }
+
+        if (Object.keys(validationErrors).length > 0) {
+          return res.status(400).json({
+            success: false,
+            message: 'Validation error',
+            errors: validationErrors
+          });
+        }
+
+        // Fetch festival details to resolve event_id and owner user_id
+        const [festRows] = await query(
+          'SELECT event_id, user_id, film_festival_start_date, film_festival_end_date FROM film_festivals WHERE film_festival_id = ? AND (is_deleted = 0 OR is_deleted IS NULL) LIMIT 1',
+          [festivalId]
+        );
+        if (festRows.length === 0) {
+          return res.status(404).json({ success: false, message: 'Film festival not found.' });
+        }
+
+        const eventId = festRows[0].event_id;
+        const festivalOwnerUserId = festRows[0].user_id || 1;
+
+        // Auto-calculate registration_type based on festival dates
+        const startDate = festRows[0].film_festival_start_date ? new Date(festRows[0].film_festival_start_date) : null;
+        const endDate   = festRows[0].film_festival_end_date ? new Date(festRows[0].film_festival_end_date) : null;
+        const now       = new Date();
+
+        let autoRegistrationType = 'Pre-Registered';
+        if (startDate && now >= startDate) {
+          autoRegistrationType = 'On-Spot';
+        }
+
+        let availableQrIds = [];
+        if (qrIdFrom !== null && !isNaN(qrIdFrom)) {
+          const fromId = qrIdFrom;
+          const toId   = (qrIdTo !== null && !isNaN(qrIdTo)) ? qrIdTo : fromId;
+
+          // Query saas_qr table for unassigned QR IDs in range
+          const [qrRows] = await query(
+            `SELECT qr_id FROM saas_qr 
+             WHERE qr_id BETWEEN ? AND ? 
+               AND attendee_id IS NULL 
+             ORDER BY qr_id ASC`,
+            [fromId, toId]
+          );
+
+          availableQrIds = qrRows.map(r => r.qr_id);
+        }
+
+        let records = [];
+        const fileExt = path.extname(uploadedFile.originalname).toLowerCase();
+
+        try {
+          if (fileExt === '.xlsx' || fileExt === '.xls' || (uploadedFile.mimetype && (uploadedFile.mimetype.includes('excel') || uploadedFile.mimetype.includes('spreadsheetml')))) {
+            const workbook = XLSX.read(uploadedFile.buffer, { type: 'buffer' });
+            const firstSheetName = workbook.SheetNames[0];
+            const worksheet = workbook.Sheets[firstSheetName];
+            records = XLSX.utils.sheet_to_json(worksheet, { defval: '' });
+          } else {
+            try {
+              records = parse(uploadedFile.buffer, {
+                columns: true,
+                skip_empty_lines: true,
+                trim: true,
+              });
+            } catch (csvErr) {
+              const workbook = XLSX.read(uploadedFile.buffer, { type: 'buffer' });
+              const firstSheetName = workbook.SheetNames[0];
+              const worksheet = workbook.Sheets[firstSheetName];
+              records = XLSX.utils.sheet_to_json(worksheet, { defval: '' });
+            }
+          }
+        } catch (parseErr) {
+          return res.status(400).json({
+            success: false,
+            message: 'Validation error',
+            errors: { file: `Failed to parse file: ${parseErr.message}` }
+          });
+        }
+
+        if (!records || records.length === 0) {
+          return res.status(400).json({
+            success: false,
+            message: 'Validation error',
+            errors: { file: 'Uploaded file is empty.' }
+          });
+        }
+
+        const getRowValue = (row, possibleKeys) => {
+          const rowKeys = Object.keys(row);
+          const key = rowKeys.find(k => possibleKeys.includes(k.toLowerCase().replace(/[\s_]/g, '')));
+          return key ? String(row[key] || '').trim() : '';
+        };
+
+        const results = [];
+        const batchEmails = new Set();
+
+        for (const row of records) {
+          // Skip completely empty rows
+          const rowValues = Object.values(row).map(v => String(v || '').trim()).filter(Boolean);
+          if (rowValues.length === 0) continue;
+
+          try {
+            const name = getRowValue(row, ['name', 'fullname', 'full_name', 'attendee_name', 'attendeename']);
+            if (!name) {
+              throw new Error('Name is required.');
+            }
+
+            const rawEmail = getRowValue(row, ['email', 'emailaddress', 'email_address']);
+            const cleanEmail = rawEmail ? rawEmail.toLowerCase().trim() : null;
+
+            if (cleanEmail) {
+              if (batchEmails.has(cleanEmail)) {
+                throw new Error('Duplicate email in upload file.');
+              }
+              const emailExists = await SaasAttendee.existsByEmail(cleanEmail, festivalId);
+              if (emailExists) {
+                throw new Error('Email is already registered for this festival.');
+              }
+              batchEmails.add(cleanEmail);
+            }
+
+            const rawPhone = getRowValue(row, ['phone', 'phonenumber', 'phone_number', 'mobile', 'mobilenumber', 'mobile_number']);
+            const cleanPhone = rawPhone ? rawPhone.trim() : null;
+
+            const delegateCategory = getRowValue(row, ['delegatecategory', 'deligatecategory', 'delegate_category', 'deligate_category', 'category']) || fallbackCategory;
+            if (!delegateCategory) {
+              throw new Error('delegate_category is required.');
+            }
+
+            const registrationType = getRowValue(row, ['registrationtype', 'registration_type', 'type']) || autoRegistrationType;
+
+            let assignedQrId = null;
+            if (qrIdFrom !== null && !isNaN(qrIdFrom)) {
+              if (availableQrIds.length === 0) {
+                throw new Error('No available unassigned QR code left in specified range [qr_id_from, qr_id_to].');
+              }
+              assignedQrId = availableQrIds.shift();
+            }
+
+            const reg = await SaasAttendee.create({
+              festivalId,
+              eventId,
+              registeredByUserId: festivalOwnerUserId,
+              registeredByRole: 'admin',
+              qrId: assignedQrId,
+              name,
+              email: cleanEmail,
+              phone: cleanPhone,
+              delegateCategory,
+              registrationType,
+            });
+
+            if (assignedQrId) {
+              await SaasQr.updateAttendeeId(assignedQrId, reg.id);
+            }
+
+            results.push({
+              attendee_id: reg.id,
+              qr_id: assignedQrId,
+              qr_token: reg.qr_token,
+              name,
+              email: cleanEmail,
+              phone: cleanPhone,
+              delegate_category: delegateCategory,
+              registration_type: registrationType,
+              success: true,
+            });
+          } catch (rowErr) {
+            results.push({
+              row,
+              success: false,
+              error: rowErr.message,
+            });
+          }
+        }
+
+        const successfulCount = results.filter(r => r.success).length;
+
+        return res.status(201).json({
+          success: true,
+          message: `Public bulk registration complete: ${successfulCount}/${results.length} registered successfully.`,
+          data: results,
+        });
+
+      } catch (error) {
+        console.error('Public registration error:', error.message);
+        return res.status(500).json({ success: false, message: 'Public registration failed.' });
+      }
+    });
+  }
+
 }
 
 module.exports = RegistrationController;

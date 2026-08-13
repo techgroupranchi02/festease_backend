@@ -171,6 +171,21 @@ static maskPhone(phone) {
   }
 
   /**
+   * Update ONLY attendee_id in saas_qr table for a given qr_id.
+   *
+   * @param {number} qrId
+   * @param {number} attendeeId
+   * @returns {Promise<boolean>}
+   */
+  static async updateAttendeeId(qrId, attendeeId) {
+    const [result] = await query(
+      `UPDATE saas_qr SET attendee_id = ? WHERE qr_id = ?`,
+      [attendeeId, qrId]
+    );
+    return result.affectedRows > 0;
+  }
+
+  /**
    * Assign an attendee to a QR code by qr_data.
    *
    * @param {string} qrData

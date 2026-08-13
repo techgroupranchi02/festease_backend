@@ -140,14 +140,13 @@ class CheckinController {
       const { qr_token, checkin_venue_id, delegate_category, remarks } = req.body || {};
 
       // --- Input validation ---
-      const result = validate(req.body, {
-        qr_token: [rules.required(), rules.string()],
-        delegate_category: [
-            rules.required(),
-            rules.string(),
-            rules.inList(['Student / Senior Citizen', 'Student', 'Cinephile', 'Senior Citizen', 'Filmmaker', 'Film Fraternity', 'Guest', 'General Delegate', 'Discovery Film', 'Echoes School'])
-          ],
-      });
+      const validationRules = {
+        qr_token: [rules.required(), rules.string()]
+      };
+      if (delegate_category !== undefined && delegate_category !== null && delegate_category !== '') {
+        validationRules.delegate_category = [rules.string()];
+      }
+      const result = validate(req.body, validationRules);
       if (!result.valid) return sendValidationError(res, result.errors);
 
       // --- Decrypt & verify PASETO token ---
@@ -218,21 +217,28 @@ class CheckinController {
       const festivalOwnerUserId = festivalRows.length > 0 ? festivalRows[0].user_id : null;
       const checkedInByRole = checkedInByUserId === festivalOwnerUserId ? 'admin' : 'volunteer';
 
+      // --- Clean delegate_category ---
+      const cleanDelegateCategory = (delegate_category && typeof delegate_category === 'string' && delegate_category.trim() !== '')
+        ? delegate_category.trim()
+        : null;
+
       // --- Create check-in record ---
       const checkin = await SaasCheckin.create({
         attendeeId:              reg.id,
         eventId:                 reg.event_id,
         festivalId,
         checkinVenueId:          checkin_venue_id ? parseInt(checkin_venue_id) : null,
-        delegateCategory:        delegate_category.trim(),
+        delegateCategory:        cleanDelegateCategory,
         checkedInByUserId,
         checkedInByRole,
         checkedInByVolunteerId:  checkedInByRole === 'volunteer' ? checkedInByUserId : null,
         remarks:                 remarks || null,
       });
 
-      // --- Override delegate_category in saas_attendees table to latest check-in ---
-      await SaasAttendee.updateDelegateCategory(reg.id, delegate_category.trim());
+      // --- Override delegate_category in saas_attendees table to latest check-in if provided ---
+      if (cleanDelegateCategory) {
+        await SaasAttendee.updateDelegateCategory(reg.id, cleanDelegateCategory);
+      }
 
       return res.json({
         success: true,
@@ -242,7 +248,7 @@ class CheckinController {
           registration_id:  reg.id,
           name:             reg.name,
           email:            reg.email,
-          delegate_category: delegate_category.trim(),
+          delegate_category: cleanDelegateCategory || reg.delegate_category || null,
           checkin_venue_id: checkin_venue_id || null,
         },
       });

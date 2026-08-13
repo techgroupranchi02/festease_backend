@@ -43,6 +43,9 @@ router.get('/system/health', SystemController.getHealth);
 router.get('/system/tables', SystemController.getTables);
 router.get('/health', SystemController.getHealth);
 
+// Public Attendees Registration Route (unauthenticated)
+router.post('/public/festivals/:festival_id/registrations', RegistrationController.publicRegister);
+
 const authRouter = express.Router();
 authRouter.use(authenticateJwt);
 authRouter.get('/my-profile', AuthController.getMe); 

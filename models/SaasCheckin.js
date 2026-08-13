@@ -69,16 +69,29 @@ class SaasCheckin {
    * @param {number|null} checkinVenueId
    * @returns {object|null}
    */
+  static getValidityMinutes() {
+    return parseInt(process.env.CHECKIN_MINUTES || process.env.CHECKIN_MINS || process.env.CHECKIN_VALIDITY_MINUTES || 1, 10) || 1;
+  }
+
+  /**
+   * Find a check-in record by attendee_id and checkin_venue_id within validity minutes.
+   *
+   * @param {number} attendeeId
+   * @param {number|null} checkinVenueId
+   * @returns {object|null}
+   */
   static async findByAttendeeAndVenue(attendeeId, checkinVenueId) {
+    const mins = SaasCheckin.getValidityMinutes();
     if (checkinVenueId !== null && checkinVenueId !== undefined) {
+      // check if checkin is within n mins
       const [rows] = await query(
-        `SELECT * FROM saas_checkins WHERE attendee_id = ? AND checkin_venue_id = ? LIMIT 1`,
+        `SELECT * FROM saas_checkins WHERE attendee_id = ? AND checkin_venue_id = ? AND check_in_at >= NOW() - INTERVAL ${mins} MINUTE LIMIT 1`,
         [attendeeId, checkinVenueId]
       );
       return rows.length > 0 ? rows[0] : null;
     } else {
       const [rows] = await query(
-        `SELECT * FROM saas_checkins WHERE attendee_id = ? AND checkin_venue_id IS NULL LIMIT 1`,
+        `SELECT * FROM saas_checkins WHERE attendee_id = ? AND checkin_venue_id IS NULL AND check_in_at >= NOW() - INTERVAL ${mins} MINUTE LIMIT 1`,
         [attendeeId]
       );
       return rows.length > 0 ? rows[0] : null;
@@ -94,6 +107,22 @@ class SaasCheckin {
   static async findAllByAttendeeId(attendeeId) {
     const [rows] = await query(
       `SELECT * FROM saas_checkins WHERE attendee_id = ? ORDER BY check_in_at DESC`,
+      [attendeeId]
+    );
+    return rows;
+  }
+
+  /**
+   * Find recent check-in records for an attendee within given minutes (defaults to env setting).
+   *
+   * @param {number} attendeeId
+   * @param {number|null} [mins=null]
+   * @returns {Array}
+   */
+  static async findRecentByAttendeeId(attendeeId, mins = null) {
+    const validMins = mins !== null && mins !== undefined ? parseInt(mins, 10) : SaasCheckin.getValidityMinutes();
+    const [rows] = await query(
+      `SELECT * FROM saas_checkins WHERE attendee_id = ? AND check_in_at >= NOW() - INTERVAL ${validMins} MINUTE ORDER BY check_in_at DESC`,
       [attendeeId]
     );
     return rows;

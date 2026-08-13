@@ -328,7 +328,11 @@ class CheckinController {
 
       // Get all check-ins for this attendee
       const allCheckins = await SaasCheckin.findAllByAttendeeId(reg.id);
-      const festivalCheckins = allCheckins.filter(c => Number(c.festival_id) === Number(festivalId));
+      const allFestivalCheckins = allCheckins.filter(c => Number(c.festival_id) === Number(festivalId));
+
+      // Get recent check-ins within validity minutes for this attendee (for entryStatus)
+      const recentCheckins = await SaasCheckin.findRecentByAttendeeId(reg.id);
+      const festivalCheckins = recentCheckins.filter(c => Number(c.festival_id) === Number(festivalId));
 
       const checkedInVenueIds = new Set(
         festivalCheckins
@@ -360,39 +364,27 @@ class CheckinController {
         }
       }
 
-      // Determine venue-specific check-in time
-      const checkin_venue_id = req.query.checkin_venue_id ? parseInt(req.query.checkin_venue_id) : null;
-      let targetVenueId = checkin_venue_id;
-      if (!targetVenueId && venues.length === 1) {
-        targetVenueId = venues[0].venue_id;
-      }
+      // Map all historical check-ins to venue_checkins format (chronological order)
+      const chronologicalCheckins = [...allFestivalCheckins].reverse();
+      const venueMap = new Map(venues.map(v => [Number(v.venue_id), v.venue_name]));
 
-      let checkinTime = null;
-      if (targetVenueId) {
-        const venueCheckin = festivalCheckins.find(c => Number(c.checkin_venue_id) === Number(targetVenueId));
-        checkinTime = venueCheckin ? (venueCheckin.check_in_at || venueCheckin.created_at || null) : null;
-      } else {
-        const latestCheckin = festivalCheckins.length > 0 ? festivalCheckins[0] : null;
-        checkinTime = latestCheckin ? (latestCheckin.check_in_at || latestCheckin.created_at || null) : null;
-      }
-
-      // Detailed check-in info per venue
-      const venueCheckins = venues
-        .filter(v => checkedInVenueIds.has(Number(v.venue_id)))
-        .map(v => {
-          const fc = festivalCheckins.find(c => Number(c.checkin_venue_id) === Number(v.venue_id));
-          return {
-            venue_id: v.venue_id,
-            venue_name: v.venue_name,
-            category: fc && fc.delegate_category ? fc.delegate_category : (reg.delegate_category || null),
-            checkin_time: fc ? (fc.check_in_at || fc.created_at || null) : null
-          };
-        });
+      const venueCheckins = chronologicalCheckins.map((c, index) => {
+        const venueName = c.checkin_venue_id !== null 
+          ? (venueMap.get(Number(c.checkin_venue_id)) || `Venue #${c.checkin_venue_id}`)
+          : null;
+        return {
+          id: index + 1,
+          venue_id: c.checkin_venue_id !== null ? Number(c.checkin_venue_id) : null,
+          venue_name: venueName,
+          category: c.delegate_category || reg.delegate_category || null,
+          checkin_time: c.check_in_at || c.created_at || null
+        };
+      });
 
       const registrationTime = reg.registered_at || reg.created_at || null;
 
       // Delegate category from saas_checkins table (or fallback to registration category)
-      const checkinWithCategory = festivalCheckins.find(c => c.delegate_category);
+      const checkinWithCategory = allFestivalCheckins.find(c => c.delegate_category);
       const categoryFromCheckin = checkinWithCategory
         ? checkinWithCategory.delegate_category
         : (reg.delegate_category || null);

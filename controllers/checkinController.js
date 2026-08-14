@@ -258,6 +258,117 @@ class CheckinController {
     }
   }
 
+  static async checkInByQRId(req, res) {
+    try {
+      const festivalId         = parseInt(req.params.festival_id);
+      const checkedInByUserId  = req.user.user_id;
+      const { qr_id, checkin_venue_id, delegate_category, remarks } = req.body || {};
+
+      // --- Input validation ---
+      const validationRules = {
+        qr_id: [rules.required()]
+      };
+      if (delegate_category !== undefined && delegate_category !== null && delegate_category !== '') {
+        validationRules.delegate_category = [rules.string()];
+      }
+      const result = validate(req.body, validationRules);
+      if (!result.valid) return sendValidationError(res, result.errors);
+
+      // --- Load QR record by qr_id ---
+      const qrRecord = await SaasQr.findById(parseInt(qr_id));
+      if (!qrRecord) {
+        return res.status(404).json({ success: false, message: `QR code with ID "${qr_id}" not found.` });
+      }
+      if (!qrRecord.attendee_id) {
+        return res.status(400).json({ success: false, message: `QR code with ID "${qr_id}" is not yet assigned to any attendee.` });
+      }
+
+      // --- Load attendee ---
+      const reg = await SaasAttendee.findById(parseInt(qrRecord.attendee_id));
+      if (!reg) {
+        return res.status(404).json({ success: false, message: 'Registration not found.' });
+      }
+
+      if (reg.festival_id !== festivalId) {
+        return res.status(403).json({ success: false, message: 'Registration does not belong to your festival.' });
+      }
+      if (reg.status === 'cancelled') {
+        return res.status(409).json({ success: false, message: 'Attendee registration has been cancelled.' });
+      }
+
+      // --- Check if already checked in at this venue ---
+      const venueId = checkin_venue_id ? parseInt(checkin_venue_id) : null;
+      const existing = await SaasCheckin.findByAttendeeAndVenue(reg.id, venueId);
+      if (existing) {
+        const venues = await FestivalVenue.findByFestivalId(festivalId);
+        const matchedVenue = venues.find(v => Number(v.venue_id) === Number(existing.checkin_venue_id || venueId));
+        const venueName = matchedVenue ? matchedVenue.venue_name : (existing.checkin_venue_id ? `Venue #${existing.checkin_venue_id}` : 'this venue');
+        const formattedTime = formatCheckinTime(existing.check_in_at || existing.created_at);
+
+        return res.status(409).json({
+          success: false,
+          message: `Attendee already checked in at ${formattedTime} at ${venueName}.`,
+          data: {
+            checkin_id: existing.checkin_id,
+            check_in_at: existing.check_in_at,
+            checkin_venue_id: existing.checkin_venue_id,
+            venue_name: venueName,
+            formatted_check_in_at: formattedTime
+          },
+        });
+      }
+
+      // --- Determine role ---
+      const [festivalRows] = await query(
+        'SELECT user_id FROM film_festivals WHERE film_festival_id = ? AND (is_deleted = 0 OR is_deleted IS NULL) LIMIT 1',
+        [festivalId]
+      );
+      const festivalOwnerUserId = festivalRows.length > 0 ? festivalRows[0].user_id : null;
+      const checkedInByRole = checkedInByUserId === festivalOwnerUserId ? 'admin' : 'volunteer';
+
+      // --- Clean delegate_category ---
+      const cleanDelegateCategory = (delegate_category && typeof delegate_category === 'string' && delegate_category.trim() !== '')
+        ? delegate_category.trim()
+        : null;
+
+      // --- Create check-in record ---
+      const checkin = await SaasCheckin.create({
+        attendeeId:              reg.id,
+        eventId:                 reg.event_id,
+        festivalId,
+        checkinVenueId:          checkin_venue_id ? parseInt(checkin_venue_id) : null,
+        delegateCategory:        cleanDelegateCategory,
+        checkedInByUserId,
+        checkedInByRole,
+        checkedInByVolunteerId:  checkedInByRole === 'volunteer' ? checkedInByUserId : null,
+        remarks:                 remarks || null,
+      });
+
+      // --- Override delegate_category in saas_attendees table to latest check-in if provided ---
+      if (cleanDelegateCategory) {
+        await SaasAttendee.updateDelegateCategory(reg.id, cleanDelegateCategory);
+      }
+
+      return res.json({
+        success: true,
+        message: `${reg.name} successfully checked in.`,
+        data: {
+          checkin_id:       checkin.id,
+          registration_id:  reg.id,
+          name:             reg.name,
+          email:            reg.email,
+          phone:            reg.phone,
+          checkin_venue_id: checkin_venue_id ? parseInt(checkin_venue_id) : null,
+          delegate_category: cleanDelegateCategory || reg.delegate_category || null,
+          check_in_at:      formatCheckinTime(new Date()),
+        },
+      });
+    } catch (err) {
+      console.error('checkInByQRId error:', err.message);
+      return res.status(500).json({ success: false, message: 'Failed to process check-in.' });
+    }
+  }
+
   static async scanQrCode(req, res) {
     try {
       const festivalId = parseInt(req.params.festival_id);

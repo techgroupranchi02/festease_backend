@@ -202,7 +202,7 @@ class RegistrationController {
         };
 
         if (cleanEmail) {
-          validationSchema.email = [rules.email(), rules.maxLength(255)];
+          validationSchema.email = [rules.string(), rules.maxLength(255)];
         }
         if (cleanPhone) {
           validationSchema.phone = [rules.string(), rules.minLength(10), rules.maxLength(30)];
@@ -370,6 +370,46 @@ class RegistrationController {
           const key = rowKeys.find(k => possibleKeys.includes(k.toLowerCase().replace(/[\s_]/g, '')));
           return key ? String(row[key] || '').trim() : '';
         };
+
+        // Fetch existing emails for this festival from both saas_unregistered_attendees and saas_attendees
+        const [existingUnregistered] = await query(
+          'SELECT DISTINCT LOWER(email) AS email FROM saas_unregistered_attendees WHERE festival_id = ? AND email IS NOT NULL AND TRIM(email) != ""',
+          [festivalId]
+        );
+        const [existingRegistered] = await query(
+          'SELECT DISTINCT LOWER(email) AS email FROM saas_attendees WHERE festival_id = ? AND email IS NOT NULL AND TRIM(email) != "" AND (status IS NULL OR status != "cancelled")',
+          [festivalId]
+        );
+
+        const existingEmails = new Set([
+          ...existingUnregistered.map(r => r.email.toLowerCase()),
+          ...existingRegistered.map(r => r.email.toLowerCase())
+        ]);
+
+        const seenInFile = new Set();
+        const duplicateEmails = new Set();
+
+        for (const row of records) {
+          const emailVal = getRowValue(row, ['email', 'emailaddress']);
+          const cleanEmail = emailVal ? emailVal.trim().toLowerCase() : null;
+
+          if (cleanEmail) {
+            if (seenInFile.has(cleanEmail) || existingEmails.has(cleanEmail)) {
+              duplicateEmails.add(cleanEmail);
+            } else {
+              seenInFile.add(cleanEmail);
+            }
+          }
+        }
+
+        if (duplicateEmails.size > 0) {
+          const dupList = Array.from(duplicateEmails).join(', ');
+          return res.status(400).json({
+            success: false,
+            message: `Duplicate email(s) found: ${dupList}`,
+            duplicate_emails: Array.from(duplicateEmails),
+          });
+        }
 
         const attendeesToInsert = records.map(row => ({
           name: getRowValue(row, ['name', 'fullname']) || null,

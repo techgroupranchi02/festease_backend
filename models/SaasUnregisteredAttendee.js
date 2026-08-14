@@ -109,6 +109,20 @@ class SaasUnregisteredAttendee {
               OR
               ((u.email IS NULL OR u.email = '' OR sa2.email IS NULL OR sa2.email = '') AND u.phone_number IS NOT NULL AND u.phone_number != '' AND sa2.phone IS NOT NULL AND sa2.phone != '' AND u.phone_number = sa2.phone)
             )
+            AND u.saas_unregistered_attendee_id = (
+              SELECT u2.saas_unregistered_attendee_id
+              FROM saas_unregistered_attendees u2
+              WHERE u2.festival_id = sa2.festival_id
+                AND (
+                  (u2.email IS NOT NULL AND u2.email != '' AND sa2.email IS NOT NULL AND sa2.email != '' AND LOWER(u2.email) = LOWER(sa2.email))
+                  OR
+                  ((u2.email IS NULL OR u2.email = '' OR sa2.email IS NULL OR sa2.email = '') AND u2.phone_number IS NOT NULL AND u2.phone_number != '' AND sa2.phone IS NOT NULL AND sa2.phone != '' AND u2.phone_number = sa2.phone)
+                )
+              ORDER BY 
+                CASE WHEN (u2.email IS NOT NULL AND u2.email != '' AND sa2.email IS NOT NULL AND sa2.email != '' AND LOWER(u2.email) = LOWER(sa2.email)) THEN 1 ELSE 2 END,
+                u2.saas_unregistered_attendee_id ASC
+              LIMIT 1
+            )
           ORDER BY 
             CASE WHEN (u.email IS NOT NULL AND u.email != '' AND sa2.email IS NOT NULL AND sa2.email != '' AND LOWER(u.email) = LOWER(sa2.email)) THEN 1 ELSE 2 END,
             sa2.attendee_id DESC

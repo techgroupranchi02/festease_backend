@@ -110,6 +110,17 @@ static maskPhone(phone) {
   }
 
   /**
+   * Find a QR record by qr_id (alias for findById).
+   *
+   * @param {number} qrId
+   * @returns {Promise<object|null>}
+   */
+  static async findByQrId(qrId) {
+    return this.findById(qrId);
+  }
+
+
+  /**
    * Find a QR record by qr_data string.
    *
    * @param {string} qrData

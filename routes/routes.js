@@ -136,6 +136,7 @@ const checkRouter = express.Router({ mergeParams: true });
 checkRouter.use(authenticateJwt, authorizeRole(['checkin']));
 checkRouter.get('/venues-list', CheckinController.getVenues); 
 checkRouter.get('/qr-check/:qr_token', CheckinController.scanQrCode); 
-checkRouter.post('/check-in', CheckinController.checkIn); 
+checkRouter.post('/check-in', CheckinController.checkIn);
+checkRouter.post('/check-in-by-id', CheckinController.checkInByQRId); 
 router.use('/festivals/:festival_id', checkRouter);
 module.exports = router;

@@ -86,6 +86,7 @@ class SaasUnregisteredAttendee {
         u.saas_unregistered_attendee_id,
         sa.attendee_id,
         sa.qr_id,
+        sq.qr_data,
         COALESCE(sa.event_id, u.event_id) AS event_id,
         COALESCE(sa.name, u.name) AS name,
         COALESCE(sa.email, u.email) AS email,
@@ -128,6 +129,7 @@ class SaasUnregisteredAttendee {
             sa2.attendee_id DESC
           LIMIT 1
         )
+      LEFT JOIN saas_qr sq ON sq.qr_id = sa.qr_id
       WHERE u.festival_id = ?
 
       UNION ALL
@@ -136,6 +138,7 @@ class SaasUnregisteredAttendee {
         NULL AS saas_unregistered_attendee_id,
         sa.attendee_id,
         sa.qr_id,
+        sq.qr_data,
         sa.event_id,
         sa.name,
         sa.email,
@@ -148,6 +151,7 @@ class SaasUnregisteredAttendee {
         1 AS is_registered,
         sa.status
       FROM saas_attendees sa
+      LEFT JOIN saas_qr sq ON sq.qr_id = sa.qr_id
       WHERE sa.festival_id = ?
         AND (sa.status IS NULL OR sa.status != 'cancelled')
         AND NOT EXISTS (
@@ -197,12 +201,8 @@ class SaasUnregisteredAttendee {
 
     const whereClause = conditions.length > 0 ? ' WHERE ' + conditions.join(' AND ') : '';
 
-    // Total count
     const countSql = `SELECT COUNT(*) AS total FROM (${baseSql}) AS merged${whereClause}`;
-    const [countRows] = await query(countSql, params);
-    const totalRecords = countRows[0].total;
 
-    // Pagination
     let limitClause = '';
     const queryParams = [...params];
     const parsedLimit = parseInt(limit) || 10;
@@ -214,9 +214,16 @@ class SaasUnregisteredAttendee {
       queryParams.push(parsedLimit, offset);
     }
 
-    // Query records
     const selectSql = `SELECT * FROM (${baseSql}) AS merged${whereClause} ORDER BY created_at DESC${limitClause}`;
-    const [rows] = await query(selectSql, queryParams);
+
+    // Execute countSql and selectSql concurrently in parallel
+    const [countResult, selectResult] = await Promise.all([
+      query(countSql, params),
+      query(selectSql, queryParams)
+    ]);
+
+    const totalRecords = countResult[0][0].total;
+    const rows = selectResult[0];
 
     const pageOffset = (limit === 'all' || parsedLimit <= 0) ? 0 : (parsedPage - 1) * parsedLimit;
     const formattedRows = rows.map((r, index) => ({

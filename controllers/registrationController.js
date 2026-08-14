@@ -492,6 +492,22 @@ class RegistrationController {
         registrationStatus,
       });
 
+      // Batch fetch missing QR records in a single query if any item has qr_id but no qr_data
+      const qrIdsToFetch = result.data
+        .filter(item => item.status === 'registered' && item.attendee_id && !item.qr_token && item.qr_id && !item.qr_data)
+        .map(item => item.qr_id);
+
+      const qrMap = new Map();
+      if (qrIdsToFetch.length > 0) {
+        const [qrRows] = await query(
+          'SELECT qr_id, qr_data FROM saas_qr WHERE qr_id IN (?)',
+          [qrIdsToFetch]
+        );
+        for (const r of qrRows) {
+          qrMap.set(r.qr_id, r.qr_data);
+        }
+      }
+
       const pageOffset = (result.page - 1) * (result.perPage || 10);
       const dataWithId = await Promise.all(result.data.map(async (item, index) => {
         let qrToken = item.qr_token || null;
@@ -499,8 +515,7 @@ class RegistrationController {
         if (item.status === 'registered' && item.attendee_id && !qrToken) {
           try {
             if (qrId) {
-              const qrRecord = await SaasQr.findById(qrId);
-              const qrData = qrRecord ? qrRecord.qr_data : `BISFF2026-${qrId}`;
+              const qrData = item.qr_data || qrMap.get(qrId) || `BISFF2026-${qrId}`;
               qrToken = await encryptQrPayload({
                 qr_id:       qrId,
                 qr_data:     qrData,

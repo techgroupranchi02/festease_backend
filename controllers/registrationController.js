@@ -192,7 +192,7 @@ class RegistrationController {
           delegate_category: [
             rules.required(),
             rules.string(),
-            rules.inList(['Student / Senior Citizen', 'Student', 'Cinephile', 'Senior Citizen', 'Filmmaker', 'Film Fraternity', 'Guest', 'General Delegate', 'Discovery Film', 'Echoes School'])
+            rules.inList(['Media', 'Student / Senior Citizen', 'Student', 'Cinephile', 'Senior Citizen', 'Filmmaker', 'Film Fraternity', 'Guest', 'General Delegate', 'Discovery Film', 'Echoes School'])
           ],
           registration_type: [
             rules.required(),

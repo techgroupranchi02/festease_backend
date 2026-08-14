@@ -371,21 +371,7 @@ class RegistrationController {
           return key ? String(row[key] || '').trim() : '';
         };
 
-        // Fetch existing emails for this festival from both saas_unregistered_attendees and saas_attendees
-        const [existingUnregistered] = await query(
-          'SELECT DISTINCT LOWER(email) AS email FROM saas_unregistered_attendees WHERE festival_id = ? AND email IS NOT NULL AND TRIM(email) != ""',
-          [festivalId]
-        );
-        const [existingRegistered] = await query(
-          'SELECT DISTINCT LOWER(email) AS email FROM saas_attendees WHERE festival_id = ? AND email IS NOT NULL AND TRIM(email) != "" AND (status IS NULL OR status != "cancelled")',
-          [festivalId]
-        );
-
-        const existingEmails = new Set([
-          ...existingUnregistered.map(r => r.email.toLowerCase()),
-          ...existingRegistered.map(r => r.email.toLowerCase())
-        ]);
-
+        const uploadedEmails = [];
         const seenInFile = new Set();
         const duplicateEmails = new Set();
 
@@ -394,10 +380,29 @@ class RegistrationController {
           const cleanEmail = emailVal ? emailVal.trim().toLowerCase() : null;
 
           if (cleanEmail) {
-            if (seenInFile.has(cleanEmail) || existingEmails.has(cleanEmail)) {
+            if (seenInFile.has(cleanEmail)) {
               duplicateEmails.add(cleanEmail);
             } else {
               seenInFile.add(cleanEmail);
+              uploadedEmails.push(cleanEmail);
+            }
+          }
+        }
+
+        // Query database ONLY for the specific emails in the uploaded file using a single combined query
+        if (uploadedEmails.length > 0) {
+          const [existingRows] = await query(
+            `SELECT LOWER(email) AS email FROM saas_unregistered_attendees 
+             WHERE festival_id = ? AND LOWER(email) IN (?)
+             UNION
+             SELECT LOWER(email) AS email FROM saas_attendees 
+             WHERE festival_id = ? AND (status IS NULL OR status != 'cancelled') AND LOWER(email) IN (?)`,
+            [festivalId, uploadedEmails, festivalId, uploadedEmails]
+          );
+
+          for (const row of existingRows) {
+            if (row.email) {
+              duplicateEmails.add(row.email.toLowerCase());
             }
           }
         }

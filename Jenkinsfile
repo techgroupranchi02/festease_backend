@@ -1,25 +1,20 @@
 pipeline {
     agent any
 
-    triggers {
-        githubPush()
-        pollSCM('H/2 * * * *')
+    options {
+        disableConcurrentBuilds()
     }
 
-    parameters {
-        choice(
-            name: 'DEPLOY_ENV',
-            choices: ['production', 'development'],
-            description: 'Target deployment environment'
-        )
+    triggers {
+        githubPush()
     }
 
     environment {
-        DEV_SERVER = 'root@147.93.105.85'
-        PROD_SERVER = 'root@31.97.239.167'
-        DEV_PATH = '/var/www/festease_backend'
-        PROD_PATH = '/var/www/festease_backend'
-        SSH_CREDENTIALS_ID = 'server-ssh-key'
+        DEV_SERVER          = 'root@147.93.105.85'
+        PROD_SERVER         = 'root@31.97.239.167'
+        DEPLOY_PATH         = '/var/www/festease_backend'
+        SSH_CREDS           = 'server-ssh-key'
+        PM2_APP_NAME        = 'saasbackend'
     }
 
     stages {
@@ -29,24 +24,41 @@ pipeline {
             }
         }
 
+        stage('Determine Environment') {
+            steps {
+                script {
+                    def branch = env.BRANCH_NAME ?: (env.GIT_BRANCH ? env.GIT_BRANCH.replaceFirst('^origin/', '').replaceFirst('^refs/heads/', '') : 'development')
+                    def isProduction = (branch == 'main' || branch == 'master')
+                    env.DEPLOY_ENV = isProduction ? 'production' : 'development'
+                    env.TARGET_SERVER = isProduction ? env.PROD_SERVER : env.DEV_SERVER
+
+                    echo "=========================================="
+                    echo " Branch Detected : ${branch}"
+                    echo " Target Env      : ${env.DEPLOY_ENV}"
+                    echo " Target Server   : ${env.TARGET_SERVER}"
+                    echo " PM2 App Name    : ${env.PM2_APP_NAME}"
+                    echo "=========================================="
+                }
+            }
+        }
+
         stage('Install Dependencies') {
             steps {
-                sh 'npm install'
+                sh 'npm ci || npm install'
             }
         }
 
         stage('Deploy') {
             steps {
-                script {
-                    def targetEnv = params.DEPLOY_ENV ?: 'production'
-                    def targetServer = (targetEnv == 'production') ? env.PROD_SERVER : env.DEV_SERVER
-                    def targetPath = (targetEnv == 'production') ? env.PROD_PATH : env.DEV_PATH
+                sshagent([env.SSH_CREDS]) {
+                    script {
+                        def server = env.TARGET_SERVER
+                        def path = env.DEPLOY_PATH
 
-                    echo "Deploying festease_backend to ${targetEnv} (${targetServer})..."
+                        echo "Deploying festease_backend to ${env.DEPLOY_ENV} (${server}:${path})..."
 
-                    sshagent([env.SSH_CREDENTIALS_ID]) {
                         // Ensure directory exists on target server
-                        sh "ssh -o StrictHostKeyChecking=no ${targetServer} 'mkdir -p ${targetPath}'"
+                        sh "ssh -o StrictHostKeyChecking=no ${server} 'mkdir -p ${path}'"
 
                         // Sync codebase, excluding node_modules, .env, logs, and keys
                         sh """
@@ -56,12 +68,12 @@ pipeline {
                                 --exclude='logs' \
                                 --exclude='keys' \
                                 --exclude='.git' \
-                                -e 'ssh -o StrictHostKeyChecking=no' ./ ${targetServer}:${targetPath}/
+                                -e 'ssh -o StrictHostKeyChecking=no' ./ ${server}:${path}/
                         """
 
                         // Remote execution: install dependencies, run migrations, reload PM2 service
                         sh """
-                            ssh -o StrictHostKeyChecking=no ${targetServer} "cd ${targetPath} && npm install --omit=dev && (npm run migrate || true) && (pm2 reload saasbackend || pm2 start index.js --name saasbackend)"
+                            ssh -o StrictHostKeyChecking=no ${server} 'cd ${path} && npm install --omit=dev && (npm run migrate || true) && (pm2 reload ${env.PM2_APP_NAME} --update-env || pm2 restart ${env.PM2_APP_NAME} --update-env || pm2 start ecosystem.config.cjs || pm2 start index.js --name ${env.PM2_APP_NAME})'
                         """
                     }
                 }
@@ -71,10 +83,10 @@ pipeline {
 
     post {
         success {
-            echo "Successfully deployed festease_backend to ${params.DEPLOY_ENV ?: 'production'} environment."
+            echo "✅ Successfully deployed festease_backend to ${env.DEPLOY_ENV} (${env.TARGET_SERVER})"
         }
         failure {
-            echo "Pipeline execution failed for festease_backend. Please check logs for details."
+            echo "❌ Pipeline failed for festease_backend on branch ${env.BRANCH_NAME ?: 'unknown'}"
         }
     }
 }

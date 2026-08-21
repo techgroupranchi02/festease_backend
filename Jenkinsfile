@@ -54,6 +54,7 @@ pipeline {
                     script {
                         def server = env.TARGET_SERVER
                         def path = env.DEPLOY_PATH
+                        def isProd = (env.DEPLOY_ENV == 'production')
 
                         echo "Deploying festease_backend to ${env.DEPLOY_ENV} (${server}:${path})..."
 
@@ -68,12 +69,13 @@ pipeline {
                                 --exclude='logs' \
                                 --exclude='keys' \
                                 --exclude='.git' \
-                                -e 'ssh -o StrictHostKeyChecking=no' ./ ${server}:${path}/
+                                -e 'ssh -o StrictHostKeyChecking=no' ./ ${server}:${path}/ || [ \$? -eq 24 ]
                         """
 
                         // Remote execution: install dependencies, run migrations, reload PM2 service
+                        def installCmd = isProd ? "npm install --omit=dev" : "npm install"
                         sh """
-                            ssh -o StrictHostKeyChecking=no ${server} 'cd ${path} && npm install --omit=dev && (npm run migrate || true) && (pm2 reload ${env.PM2_APP_NAME} --update-env || pm2 restart ${env.PM2_APP_NAME} --update-env || pm2 start ecosystem.config.cjs || pm2 start index.js --name ${env.PM2_APP_NAME})'
+                            ssh -o StrictHostKeyChecking=no ${server} 'cd ${path} && ${installCmd} && (npm run migrate || true) && (pm2 reload ${env.PM2_APP_NAME} --update-env || pm2 restart ${env.PM2_APP_NAME} --update-env || pm2 start ecosystem.config.cjs || pm2 start index.js --name ${env.PM2_APP_NAME})'
                         """
                     }
                 }

@@ -29,6 +29,7 @@ pipeline {
                 script {
                     def branch = env.BRANCH_NAME ?: (env.GIT_BRANCH ? env.GIT_BRANCH.replaceFirst('^origin/', '').replaceFirst('^refs/heads/', '') : 'development')
                     def isProduction = (branch == 'main' || branch == 'master')
+                    env.DEPLOY_BRANCH = branch
                     env.DEPLOY_ENV = isProduction ? 'production' : 'development'
                     env.TARGET_SERVER = isProduction ? env.PROD_SERVER : env.DEV_SERVER
 
@@ -54,6 +55,7 @@ pipeline {
                     script {
                         def server = env.TARGET_SERVER
                         def path = env.DEPLOY_PATH
+                        def branch = env.DEPLOY_BRANCH ?: (env.BRANCH_NAME ?: (env.GIT_BRANCH ? env.GIT_BRANCH.replaceFirst('^origin/', '').replaceFirst('^refs/heads/', '') : 'development'))
                         def isProd = (env.DEPLOY_ENV == 'production')
 
                         echo "Deploying festease_backend to ${env.DEPLOY_ENV} (${server}:${path})..."
@@ -71,6 +73,15 @@ pipeline {
                                 --exclude='.git' \
                                 -e 'ssh -o StrictHostKeyChecking=no' ./ ${server}:${path}/ || [ \$? -eq 24 ]
                         """
+
+                        // Ensure Git tracking & commit state remain in sync on Development server
+                        if (!isProd) {
+                            echo "🔄 Syncing Git repository state on Development server..."
+                            sh """
+                                ssh -o StrictHostKeyChecking=no ${server} \
+                                "cd ${path} && if [ -d .git ]; then git fetch origin ${branch} && (git checkout ${branch} 2>/dev/null || git checkout -b ${branch} origin/${branch} 2>/dev/null || true) && git reset --hard origin/${branch} || true; fi"
+                            """
+                        }
 
                         // Remote execution: install dependencies, run migrations, reload PM2 service
                         def installCmd = isProd ? "npm install --omit=dev" : "npm install"

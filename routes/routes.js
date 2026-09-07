@@ -139,4 +139,19 @@ checkRouter.get('/qr-check/:qr_token', CheckinController.scanQrCode);
 checkRouter.post('/check-in', CheckinController.checkIn);
 checkRouter.post('/check-in-by-id', CheckinController.checkInByQRId); 
 router.use('/festivals/:festival_id', checkRouter);
+
+/* ==========================================================================
+   Festival: Payouts & Settlement  [owner only — admin role]
+   ========================================================================== */
+const PayoutController = require("../controllers/payoutController");
+const payoutRouter = express.Router({ mergeParams: true });
+payoutRouter.use(authenticateJwt, authorizeRole(["admin"]));
+payoutRouter.get("/", PayoutController.getPayouts);
+payoutRouter.get("/export-csv", PayoutController.exportCsv);
+router.use("/festivals/:festival_id/payouts", payoutRouter);
+
+const settlementRouter = express.Router({ mergeParams: true });
+settlementRouter.use(authenticateJwt, authorizeRole(["admin"]));
+settlementRouter.get("/", PayoutController.getSettlementSettings);
+router.use("/festivals/:festival_id/settlement-settings", settlementRouter);
 module.exports = router;

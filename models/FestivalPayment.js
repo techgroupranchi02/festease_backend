@@ -79,13 +79,16 @@ class FestivalPayment {
     const [kpiRows] = await query(
       `SELECT 
         COUNT(*) as total_submissions,
-        COALESCE(SUM(base_fee_amount), 0) as gross_revenue,
-        COALESCE(SUM(platform_fee_amount), 0) as total_platform_fees,
-        COALESCE(SUM(freecomers_earnings), 0) as freecomers_earnings,
-        COALESCE(SUM(commission_amount + route_fee_amount + route_gst_amount), 0) as total_deductions,
-        COALESCE(SUM(net_settled_amount), 0) as net_settled_to_bank,
+        COALESCE(SUM(CASE WHEN settlement_status != 'refunded' THEN base_fee_amount ELSE 0 END), 0) as gross_revenue,
+        COALESCE(SUM(CASE WHEN settlement_status != 'refunded' THEN platform_fee_amount ELSE 0 END), 0) as total_platform_fees,
+        COALESCE(SUM(CASE WHEN settlement_status != 'refunded' THEN freecomers_earnings ELSE 0 END), 0) as freecomers_earnings,
+        COALESCE(SUM(CASE WHEN settlement_status != 'refunded' THEN (commission_amount + route_fee_amount + route_gst_amount) ELSE 0 END), 0) as total_deductions,
+        COALESCE(SUM(CASE WHEN settlement_status != 'refunded' THEN net_settled_amount ELSE 0 END), 0) as net_settled_to_bank,
         SUM(CASE WHEN settlement_status = 'settled' THEN 1 ELSE 0 END) as settled_count,
-        SUM(CASE WHEN settlement_status = 'pending' THEN 1 ELSE 0 END) as pending_count
+        SUM(CASE WHEN settlement_status = 'pending' THEN 1 ELSE 0 END) as pending_count,
+        SUM(CASE WHEN settlement_status = 'refunded' THEN 1 ELSE 0 END) as refunded_count,
+        COALESCE(SUM(CASE WHEN settlement_status = 'refunded' THEN refund_amount ELSE 0 END), 0) as total_refunded_amount,
+        COALESCE(SUM(CASE WHEN settlement_status = 'refunded' THEN net_settled_amount ELSE 0 END), 0) as total_reversed_amount
        FROM festival_payments
        WHERE festival_id = ?`,
       [festivalId]
@@ -100,6 +103,9 @@ class FestivalPayment {
       net_settled_to_bank: 0,
       settled_count: 0,
       pending_count: 0,
+      refunded_count: 0,
+      total_refunded_amount: 0,
+      total_reversed_amount: 0,
     };
   }
 

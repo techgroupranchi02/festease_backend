@@ -6,14 +6,14 @@ const { isTokenRevoked } = require('../utils/tokenBlacklist');
  */
 function authenticateJwt(req, res, next) {
   const authHeader = req.headers.authorization;
-  if (!authHeader || !authHeader.startsWith('Bearer ')) {
+  const token = (authHeader && authHeader.startsWith('Bearer ')) ? authHeader.split(' ')[1] : req.query.token;
+
+  if (!token) {
     return res.status(401).json({
       success: false,
       message: 'Authorization token required.'
     });
   }
-
-  const token = authHeader.split(' ')[1];
 
   // Check if token has been revoked (in-memory)
   if (isTokenRevoked(token)) {

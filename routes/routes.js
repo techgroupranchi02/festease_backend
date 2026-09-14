@@ -148,6 +148,8 @@ const payoutRouter = express.Router({ mergeParams: true });
 payoutRouter.use(authenticateJwt, authorizeRole(["admin"]));
 payoutRouter.get("/", PayoutController.getPayouts);
 payoutRouter.get("/export-csv", PayoutController.exportCsv);
+payoutRouter.get("/:payment_id/receipt", PayoutController.getReceipt);
+payoutRouter.get("/receipt/:payment_id", PayoutController.getReceipt);
 router.use("/festivals/:festival_id/payouts", payoutRouter);
 
 const settlementRouter = express.Router({ mergeParams: true });

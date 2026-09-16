@@ -47,7 +47,7 @@ class SystemController {
    * GET /api/v1/system/config
    */
   static async getConfig(req, res) {
-    const backendUrl = (process.env.FESTEASE_BACKEND_URL || 'https://apifestease.autovertest.com').replace(/\/$/, '');
+    const backendUrl = (process.env.FESTEASE_BACKEND_URL || 'https://apiffestiplus.autovertest.com').replace(/\/$/, '');
     res.json({
       success: true,
       backendUrl,

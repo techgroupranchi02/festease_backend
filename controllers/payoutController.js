@@ -1,5 +1,6 @@
 const FestivalPayment = require('../models/FestivalPayment');
 const { query } = require('../config/db');
+const { generateTaxInvoicePdf, formatDate, getSettlementPeriod } = require('../utils/taxInvoiceGenerator');
 
 /**
  * PayoutController
@@ -70,7 +71,7 @@ class PayoutController {
       const csvHeader = [
         'Submission ID', 'Filmmaker', 'Email', 'Currency',
         'Base Fee', 'Platform Fee', 'GST', 'Gateway Fee', 'Gateway GST',
-        'Gross Amount', 'Commission', 'Route Fee', 'Route GST',
+        'Gross Amount', 'Freecomers Fee', 'Route Fee', 'Route GST',
         'Net Settled', 'Transfer ID', 'Status', 'Refund ID', 'Refund Amount', 'Reverse Transfer ID', 'Refund Reason', 'Refunded At', 'Date'
       ].join(',');
 
@@ -157,7 +158,7 @@ class PayoutController {
 
   /**
    * GET /api/festivals/:festival_id/payouts/:payment_id/receipt
-   * Download payment receipt / transaction invoice PDF.
+   * Generate and download festival payout Tax Invoice PDF.
    */
   static async getReceipt(req, res) {
     try {
@@ -167,9 +168,11 @@ class PayoutController {
         return res.status(400).json({ success: false, status: false, message: 'Festival ID and Payment ID are required.' });
       }
 
-      // Look up payment to get transaction_record_id
+      // 1. Look up payment record
       const [rows] = await query(
-        `SELECT id, festival_id, transaction_record_id, submission_id 
+        `SELECT id, festival_id, submission_id, transaction_record_id, user_id, project_id,
+                currency, base_fee_amount, gross_amount, commission_rate, commission_amount,
+                settlement_status, settled_at, created_at
          FROM festival_payments 
          WHERE festival_id = ? AND (id = ? OR transaction_record_id = ?)
          LIMIT 1`,
@@ -177,41 +180,110 @@ class PayoutController {
       );
 
       const payment = rows?.[0];
-      const targetTxId = payment?.transaction_record_id || paymentId;
-
-      const freecomersBackend = (process.env.FREECOMERS_BACKEND_URL || 'https://api.autovertest.com').replace(/\/+$/, '');
-      const invoiceUrl = `${freecomersBackend}/api/v1/festivals/transactions/${targetTxId}/invoice?action=download`;
-
-      const invoiceRes = await fetch(invoiceUrl, {
-        headers: {
-          'Accept': 'application/pdf',
-        }
-      });
-
-      if (!invoiceRes.ok) {
-        const errorText = await invoiceRes.text();
-        console.error('Failed to fetch invoice from Freecomers backend:', invoiceRes.status, errorText);
-        return res.status(invoiceRes.status).json({
-          success: false,
-          status: false,
-          message: 'Failed to generate receipt PDF from payment processor.',
-        });
+      if (!payment) {
+        return res.status(404).json({ success: false, status: false, message: 'Payment record not found.' });
       }
 
-      const pdfBuffer = Buffer.from(await invoiceRes.arrayBuffer());
-      const txFormatted = String(targetTxId).padStart(6, '0');
-      const filename = `Receipt_FC-${txFormatted}.pdf`;
+      // 2. Look up festival, event, and bank account information
+      const [festRows] = await query(
+        `SELECT ff.film_festival_id, ff.film_festival_venue,
+                e.name as festival_name,
+                fba.beneficiary_name, fba.legal_entity_name, fba.email as bank_email, fba.pan_number,
+                u.email as user_email,
+                ind.name as individual_name,
+                org.name as org_name, org.address as org_address
+         FROM film_festivals ff
+         LEFT JOIN events e ON e.event_id = ff.event_id
+         LEFT JOIN festival_bank_accounts fba ON fba.festival_id = ff.film_festival_id
+         LEFT JOIN users u ON u.id = ff.user_id
+         LEFT JOIN individuals ind ON ind.user_id = ff.user_id
+         LEFT JOIN organizations org ON org.id = ff.organization_id
+         WHERE ff.film_festival_id = ?
+         LIMIT 1`,
+        [festivalId]
+      );
+
+      const fest = festRows?.[0] || {};
+
+      // Parse venue if JSON array or string
+      let venueAddress = fest.film_festival_venue;
+      if (Array.isArray(venueAddress)) {
+        venueAddress = venueAddress.filter(Boolean).join(', ');
+      } else if (typeof venueAddress === 'string') {
+        try {
+          const parsed = JSON.parse(venueAddress);
+          if (Array.isArray(parsed)) {
+            venueAddress = parsed.filter(Boolean).join(', ');
+          }
+        } catch (_) {}
+      }
+
+      const festivalName = fest.festival_name || fest.org_name || 'Film Festival';
+      const festivalCode = `FC-FEST-${String(festivalId).padStart(4, '0')}`;
+      const contactPerson = fest.beneficiary_name || fest.legal_entity_name || fest.individual_name || fest.org_name || 'Festival Director';
+      const email = fest.bank_email || fest.user_email || '—';
+      const address = venueAddress || fest.org_address || '—';
+      const gstin = fest.pan_number || '—';
+
+      const invoiceId = payment.id || paymentId;
+      const invoiceNumber = `FC-FEST-${String(invoiceId).padStart(6, '0')}`;
+      const invoiceDate = formatDate(payment.created_at || new Date());
+      const settlementPeriod = getSettlementPeriod(payment.settled_at || payment.created_at || new Date());
+      const paymentStatus = (payment.settlement_status || 'PENDING').toUpperCase();
+
+      const grossAmount = parseFloat(payment.base_fee_amount || payment.gross_amount || 0);
+      const commissionRate = parseFloat(payment.commission_rate || 6.0);
+      const commissionAmount = parseFloat((grossAmount * (commissionRate / 100)).toFixed(2));
+      const totalInvoiceAmount = commissionAmount;
+
+      // Real festival settlement: Route fee (0.25% + 18% GST) charged on transferred amount (gross - commission)
+      const routeBase = grossAmount - commissionAmount;
+      const routeFeeRate = 0.25;
+      const routeGstRate = 18.0;
+      const routeFeeAmount = parseFloat(
+        (payment.route_fee_amount !== null && payment.route_fee_amount !== undefined && payment.route_gst_amount !== null && payment.route_gst_amount !== undefined)
+          ? (Number(payment.route_fee_amount) + Number(payment.route_gst_amount)).toFixed(2)
+          : (routeBase * (routeFeeRate / 100) * (1 + (routeGstRate / 100))).toFixed(2)
+      );
+      const netPayable = parseFloat(
+        (payment.net_settled_amount !== null && payment.net_settled_amount !== undefined)
+          ? Number(payment.net_settled_amount).toFixed(2)
+          : (grossAmount - commissionAmount - routeFeeAmount).toFixed(2)
+      );
+
+      const pdfBuffer = await generateTaxInvoicePdf({
+        invoiceNumber,
+        invoiceDate,
+        paymentStatus,
+        settlementPeriod,
+        festivalName,
+        festivalId: festivalCode,
+        contactPerson,
+        email,
+        address,
+        gstin,
+        grossAmount,
+        commissionRate,
+        commissionAmount,
+        totalInvoiceAmount,
+        routeFeeRate,
+        routeGstRate,
+        routeFeeAmount,
+        netPayable,
+      });
+
+      const filename = `Tax_Invoice_${invoiceNumber}.pdf`;
 
       res.setHeader('Content-Type', 'application/pdf');
       res.setHeader('Content-Disposition', `attachment; filename="${filename}"`);
       res.setHeader('Content-Length', pdfBuffer.length);
       return res.send(pdfBuffer);
     } catch (error) {
-      console.error('PayoutController::getReceipt error:', error.message);
+      console.error('PayoutController::getReceipt error:', error);
       return res.status(500).json({
         success: false,
         status: false,
-        message: 'Failed to retrieve receipt PDF.',
+        message: 'Failed to generate tax invoice PDF.',
       });
     }
   }

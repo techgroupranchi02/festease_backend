@@ -156,4 +156,15 @@ const settlementRouter = express.Router({ mergeParams: true });
 settlementRouter.use(authenticateJwt, authorizeRole(["admin"]));
 settlementRouter.get("/", PayoutController.getSettlementSettings);
 router.use("/festivals/:festival_id/settlement-settings", settlementRouter);
+
+/* ==========================================================================
+   Festival: Submissions  [owner only — admin role]
+   ========================================================================== */
+const SubmissionsController = require("../controllers/submissionsController");
+const submissionsRouter = express.Router({ mergeParams: true });
+submissionsRouter.use(authenticateJwt, authorizeRole(["admin"]));
+submissionsRouter.get("/", SubmissionsController.getSubmissions);
+submissionsRouter.get("/filter-list", SubmissionsController.getFilterList);
+router.use("/festivals/:festival_id/submissions", submissionsRouter);
+
 module.exports = router;

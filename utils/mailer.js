@@ -10,7 +10,7 @@ const smtpPort = parseInt(process.env.SMTP_PORT || process.env.MAIL_PORT) || 587
 const smtpUser = process.env.SMTP_USER || process.env.MAIL_USERNAME || '';
 const smtpPass = process.env.SMTP_PASS || process.env.MAIL_PASSWORD || '';
 const mailFromAddr = process.env.MAIL_FROM_ADDRESS || '';
-const mailFromName = process.env.MAIL_FROM_NAME || 'ffestiplus Support';
+const mailFromName = process.env.MAIL_FROM_NAME || 'ffesti plus Support';
 const smtpFrom = process.env.SMTP_FROM || (mailFromAddr ? `"${mailFromName}" <${mailFromAddr}>` : (smtpUser && smtpUser.includes('@') ? `"${mailFromName}" <${smtpUser}>` : `"${mailFromName}" <info@freecomers.com>`));
 
 let transporter = null;

@@ -46,6 +46,32 @@ class SubmissionsController {
 
         if (response.ok) {
           const data = await response.json();
+          // Enrich with watch_link, watch_link_password, and trailer_link from DB for festival organizers
+          const submissionsList = Array.isArray(data?.submissions) ? data.submissions : [];
+          const projectIds = submissionsList
+            .map((s) => s.film_id || s.project_id)
+            .filter((id) => id != null && Number.isInteger(Number(id)));
+
+          if (projectIds.length > 0) {
+            try {
+              const [projectRows] = await query(
+                `SELECT project_id, watch_link, watch_link_password, trailer_link FROM projects WHERE project_id IN (?)`,
+                [projectIds]
+              );
+              const projectMap = new Map((projectRows || []).map((p) => [Number(p.project_id), p]));
+              submissionsList.forEach((s) => {
+                const pId = Number(s.film_id || s.project_id);
+                const proj = projectMap.get(pId);
+                if (proj) {
+                  s.watch_link = proj.watch_link || null;
+                  s.watch_link_password = proj.watch_link_password || null;
+                  s.trailer_link = proj.trailer_link || null;
+                }
+              });
+            } catch (enrichErr) {
+              console.warn('SubmissionsController: Error enriching watch links from DB:', enrichErr.message);
+            }
+          }
           return res.json(data);
         }
       } catch (fetchErr) {
@@ -73,7 +99,7 @@ class SubmissionsController {
       const [countRows] = await query(
         `SELECT COUNT(*) as total
          FROM film_festivals_submissions ffs
-         LEFT JOIN projects p ON ffs.film_id = p.project_id
+         LEFT JOIN projects p ON ffs.project_id = p.project_id
          LEFT JOIN film_festivals_category_milestone_prices price ON ffs.film_festival_category_milestone_price_id = price.film_festival_category_milestone_price_id
          LEFT JOIN film_festivals_categories cat ON price.film_festival_category_id = cat.film_festival_category_id
          LEFT JOIN countries c ON p.country_id = c.country_id
@@ -86,18 +112,21 @@ class SubmissionsController {
       const [rows] = await query(
         `SELECT 
            ffs.film_festivals_submission_id as film_festival_submission_id,
-           ffs.film_id,
+           ffs.project_id as film_id,
            p.title as film_title,
            p.thumbnail_image_name as film_logo,
            cat.name as category,
            p.runtime_minutes as runtime,
+           p.watch_link,
+           p.watch_link_password,
+           p.trailer_link,
            c.country_id,
            c.country,
            c.country_iso,
            ffs.created_at,
            ffs.updated_at
          FROM film_festivals_submissions ffs
-         LEFT JOIN projects p ON ffs.film_id = p.project_id
+         LEFT JOIN projects p ON ffs.project_id = p.project_id
          LEFT JOIN film_festivals_category_milestone_prices price ON ffs.film_festival_category_milestone_price_id = price.film_festival_category_milestone_price_id
          LEFT JOIN film_festivals_categories cat ON price.film_festival_category_id = cat.film_festival_category_id
          LEFT JOIN countries c ON p.country_id = c.country_id
@@ -120,6 +149,9 @@ class SubmissionsController {
           country_iso: r.country_iso || '',
         },
         runtime: r.runtime || 0,
+        watch_link: r.watch_link || null,
+        watch_link_password: r.watch_link_password || null,
+        trailer_link: r.trailer_link || null,
         created_at: r.created_at,
         updated_at: r.updated_at,
       }));
